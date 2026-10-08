@@ -5,7 +5,7 @@ const { norm } = require('../services/direcciones');
 const { Schema } = mongoose;
 const ObjectId = Schema.Types.ObjectId;
 
-const ROLES = ['Administrador', 'Carga', 'Consulta'];
+const { ROLES } = require('../config/permisos');
 const GEO_ESTADOS = ['pendiente', 'ok', 'aproximado', 'fallido', 'manual'];
 const ESTADOS_INSPECCION = ['pendiente', 'inspeccionado', 'observado', 'regularizado'];
 
@@ -62,6 +62,18 @@ const catalogo = (extra = {}) => {
 
 const inspectorSchema = catalogo({ legajo: { type: String, default: '', trim: true } });
 const motivoSchema = catalogo({ descripcion: { type: String, default: '', trim: true } });
+const estadoSchema = catalogo({
+  descripcion: { type: String, default: '', trim: true },
+  esInicial: { type: Boolean, default: false }, // estado con el que nace una infracción
+  requiereComentario: { type: Boolean, default: false }, // el pase a este estado exige un comentario
+  esFinal: { type: Boolean, default: false }, // estado con el que se cierra al generar el expediente
+  orden: { type: Number, default: 0 },
+});
+const oficinaSchema = catalogo({
+  descripcion: { type: String, default: '', trim: true },
+  esInicial: { type: Boolean, default: false }, // oficina donde nace una infracción
+  orden: { type: Number, default: 0 },
+});
 const tipoDocumentoSchema = catalogo({
   requerido: { type: Boolean, default: true },
   tieneVencimiento: { type: Boolean, default: false },
@@ -118,21 +130,47 @@ const documentoSchema = new Schema(
 );
 documentoSchema.index({ edificio: 1, tipo: 1 }, { unique: true });
 
-const actaVinculadaSchema = new Schema(
+const movimientoSchema = new Schema(
   {
+    fecha: { type: Date, default: Date.now },
+    oficinaOrigen: { type: ObjectId, ref: 'Oficina' },
+    oficinaDestino: { type: ObjectId, ref: 'Oficina', required: true },
+    estado: { type: ObjectId, ref: 'Estado' },
+    por: { type: ObjectId, ref: 'User', required: true },
+    comentarios: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
+const infraccionSchema = new Schema(
+  {
+    numeroActa: { type: String, required: true, unique: true, trim: true },
     edificio: { type: ObjectId, ref: 'Edificio', required: true, index: true },
-    numero: { type: String, required: true, trim: true },
-    tipo: { type: String, enum: ['acta', 'expediente'], default: 'acta' },
-    fecha: Date,
-    motivos: [{ type: ObjectId, ref: 'MotivoInfraccion' }],
-    estado: { type: String, default: '', trim: true },
-    observaciones: { type: String, default: '', trim: true },
+    infractor: { type: String, default: '', trim: true },
+    inspectoresActuantes: [{ type: ObjectId, ref: 'Inspector' }],
+    motivosInfraccion: [{ type: ObjectId, ref: 'MotivoInfraccion' }],
+    fechaInfraccion: { type: Date, required: true, index: true },
+    estado: { type: ObjectId, ref: 'Estado', required: true },
+    oficinaActual: { type: ObjectId, ref: 'Oficina', required: true },
+    asignadoA: { type: ObjectId, ref: 'User', default: null },
+    observaciones: { type: Boolean, default: false },
+    detalleObservaciones: { type: String, default: '', trim: true },
+    historialMovimientos: [movimientoSchema],
+    expediente: {
+      numero: { type: String, default: '' },
+      fecha: Date,
+      generadoPor: { type: ObjectId, ref: 'User' },
+    },
+    eliminado: { type: Boolean, default: false, index: true },
+    motivoEliminacion: { type: String, default: '' },
+    eliminadoPor: { type: ObjectId, ref: 'User' },
     origen: { type: String, enum: ['manual', 'excel'], default: 'manual' },
     lotImportacion: { type: String, index: true },
+    creadoPor: { type: ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );
-actaVinculadaSchema.index({ edificio: 1, numero: 1, tipo: 1 }, { unique: true });
+infraccionSchema.index({ estado: 1, oficinaActual: 1 });
 
 const inspeccionSchema = new Schema(
   {
@@ -181,7 +219,9 @@ module.exports = {
   TipoDocumento: mongoose.model('TipoDocumento', tipoDocumentoSchema),
   Edificio: mongoose.model('Edificio', edificioSchema),
   DocumentoEdificio: mongoose.model('DocumentoEdificio', documentoSchema),
-  ActaVinculada: mongoose.model('ActaVinculada', actaVinculadaSchema),
+  Estado: mongoose.model('Estado', estadoSchema),
+  Oficina: mongoose.model('Oficina', oficinaSchema),
+  Infraccion: mongoose.model('Infraccion', infraccionSchema),
   Inspeccion: mongoose.model('Inspeccion', inspeccionSchema),
   GeoCache: mongoose.model('GeoCache', geoCacheSchema),
   AuditLog: mongoose.model('AuditLog', auditSchema),

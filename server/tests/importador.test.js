@@ -40,17 +40,51 @@ test('edificios: errores de calle, número, existente y repetida', () => {
   assert.strictEqual(r[0].fila, 2);
 });
 
-test('actas: se vincula por dirección normalizada y valida motivos', () => {
-  const ctx = {
-    edificios: new Map([['mate de luna 10', 'E1']]),
-    motivos: new Map([['falta de habilitacion', 'M1']]),
-    existentes: new Set(),
-    permitirNuevos: false,
-  };
-  const ok = validarFilas('actas', [{ 'N° Acta': 'A-1', Calle: 'Mate de Luna', 'Número': 10, Motivos: 'Falta de habilitación', Fecha: '01/10/2026' }], ctx);
-  assert.deepStrictEqual(ok[0].errores, []);
-  assert.strictEqual(ok[0].data.edificio, 'E1');
-  const mal = validarFilas('actas', [{ 'N° Acta': 'A-2', Calle: 'Otra', 'Número': 1, Motivos: 'Inventado' }], ctx);
-  assert.ok(mal[0].errores.some((e) => e.includes('No existe un edificio')));
-  assert.ok(mal[0].errores.some((e) => e.includes('Motivo inexistente')));
+const ctxI = (extra = {}) => ({
+  edificios: new Map([['mate de luna 10', 'E1']]),
+  motivos: new Map([['falta de habilitacion', 'M1']]),
+  inspectores: new Map([['perez juan', 'I1']]),
+  estados: new Map([['observado', 'S2']]),
+  oficinas: new Map([['juridico', 'O2']]),
+  existentes: new Set(['A-9']),
+  crearEdificios: false,
+  permitirNuevos: false,
+  ...extra,
+});
+const filaI = (extra = {}) => ({ 'N° Acta': 'A-100', 'Fecha infracción': '01/10/2026', Calle: 'Mate de Luna', 'Número': 10, Inspectores: 'Pérez Juan', Motivos: 'Falta de habilitación', ...extra });
+
+test('infracciones: fila válida se vincula al edificio por dirección normalizada', () => {
+  const [r] = validarFilas('infracciones', [filaI()], ctxI());
+  assert.deepStrictEqual(r.errores, []);
+  assert.strictEqual(r.data.edificio, 'E1');
+  assert.deepStrictEqual(r.data.inspectores, ['I1']);
+  assert.deepStrictEqual(r.data.motivos, ['M1']);
+  assert.strictEqual(r.data.estado, null); // vacío = estado inicial
+});
+
+test('infracciones: errores de edificio, inspector, motivo, estado y acta repetida', () => {
+  const filas = [
+    filaI({ 'N° Acta': 'A-101', Calle: 'Otra', 'Número': 1, Inspectores: 'Nadie', Motivos: 'Inventado', Estado: 'Raro' }),
+    filaI({ 'N° Acta': 'A-9' }),
+    filaI({ 'N° Acta': 'A-102' }),
+    filaI({ 'N° Acta': 'A-102' }),
+    filaI({ 'N° Acta': 'AB', 'Fecha infracción': '' }),
+  ];
+  const r = validarFilas('infracciones', filas, ctxI());
+  const t = r[0].errores.join('|');
+  assert.ok(t.includes('No existe un edificio') && t.includes('Inspector inexistente') && t.includes('Motivo inexistente') && t.includes('Estado inexistente'));
+  assert.ok(r[1].errores[0].includes('ya existe'));
+  assert.deepStrictEqual(r[2].errores, []);
+  assert.ok(r[3].errores[0].includes('repetida'));
+  assert.ok(r[4].errores.some((e) => e.includes('N° Acta')) && r[4].errores.some((e) => e.includes('Fecha')));
+});
+
+test('infracciones: puede crear edificios y catálogos faltantes si se habilita', () => {
+  const ctx = ctxI({ crearEdificios: true, permitirNuevos: true });
+  const [r] = validarFilas('infracciones', [filaI({ Calle: 'Nueva', 'Número': 5, Inspectores: 'Gómez Ana', Motivos: 'Otro motivo' })], ctx);
+  assert.deepStrictEqual(r.errores, []);
+  assert.strictEqual(r.data.crearEdificio, true);
+  assert.deepStrictEqual(r.nuevos.inspectores, ['Gómez Ana']);
+  assert.deepStrictEqual(r.nuevos.motivos, ['Otro motivo']);
+  assert.ok(r.avisos[0].includes('Se creará el edificio'));
 });

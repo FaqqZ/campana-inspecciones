@@ -1,6 +1,6 @@
 const router = require('express').Router();
-const { Inspector, MotivoInfraccion, TipoDocumento, Campana, DocumentoEdificio, ActaVinculada, Inspeccion, Edificio } = require('../models');
-const { protect, authorize, audit } = require('../middleware/auth');
+const { Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, Campana, DocumentoEdificio, Infraccion, Inspeccion, Edificio } = require('../models');
+const { protect, authorize, permitir, audit } = require('../middleware/auth');
 
 router.use(protect);
 
@@ -9,12 +9,24 @@ const CATALOGOS = {
   inspectores: {
     Model: Inspector,
     campos: ['nombre', 'legajo', 'activo'],
-    enUso: (id) => Inspeccion.exists({ inspector: id }),
+    enUso: async (id) => (await Inspeccion.exists({ inspector: id })) || (await Infraccion.exists({ inspectoresActuantes: id })),
   },
   motivos: {
     Model: MotivoInfraccion,
     campos: ['nombre', 'descripcion', 'activo'],
-    enUso: async (id) => (await ActaVinculada.exists({ motivos: id })) || (await TipoDocumento.exists({ motivoAsociado: id })),
+    enUso: async (id) => (await Infraccion.exists({ motivosInfraccion: id })) || (await TipoDocumento.exists({ motivoAsociado: id })),
+  },
+  estados: {
+    Model: Estado,
+    campos: ['nombre', 'descripcion', 'esInicial', 'requiereComentario', 'esFinal', 'orden', 'activo'],
+    enUso: (id) => Infraccion.exists({ estado: id }),
+    unico: ['esInicial', 'esFinal'], // solo uno puede tener la bandera
+  },
+  oficinas: {
+    Model: Oficina,
+    campos: ['nombre', 'descripcion', 'esInicial', 'orden', 'activo'],
+    enUso: async (id) => (await Infraccion.exists({ oficinaActual: id })) || (await Infraccion.exists({ 'historialMovimientos.oficinaDestino': id })),
+    unico: ['esInicial'],
   },
   'tipos-documento': {
     Model: TipoDocumento,
@@ -23,10 +35,10 @@ const CATALOGOS = {
   },
 };
 
-Object.entries(CATALOGOS).forEach(([ruta, { Model, campos, enUso }]) => {
+Object.entries(CATALOGOS).forEach(([ruta, { Model, campos, enUso, unico = [] }]) => {
   router.get(`/${ruta}`, async (req, res) => {
     const filtro = req.query.todos === 'true' ? {} : { activo: true };
-    res.json(await Model.find(filtro).sort(ruta === 'tipos-documento' ? 'orden nombre' : 'nombre'));
+    res.json(await Model.find(filtro).sort(['tipos-documento', 'estados', 'oficinas'].includes(ruta) ? 'orden nombre' : 'nombre'));
   });
 
   const aplicar = (doc, body) => {
@@ -36,10 +48,13 @@ Object.entries(CATALOGOS).forEach(([ruta, { Model, campos, enUso }]) => {
     return doc;
   };
 
-  router.post(`/${ruta}`, authorize('Carga'), async (req, res) => {
+  const exclusivas = (doc) => Promise.all(unico.filter((k) => doc[k]).map((k) => Model.updateMany({ _id: { $ne: doc._id }, [k]: true }, { [k]: false })));
+
+  router.post(`/${ruta}`, permitir('editarCatalogos'), async (req, res) => {
     if (!String(req.body.nombre || '').trim()) return res.status(400).json({ message: 'El nombre es obligatorio' });
     try {
       const doc = await aplicar(new Model(), req.body).save();
+      await exclusivas(doc);
       audit('crear', Model.modelName, doc._id, req.user, doc.nombre);
       res.status(201).json(doc);
     } catch (e) {
@@ -48,11 +63,12 @@ Object.entries(CATALOGOS).forEach(([ruta, { Model, campos, enUso }]) => {
     }
   });
 
-  router.patch(`/${ruta}/:id`, authorize('Carga'), async (req, res) => {
+  router.patch(`/${ruta}/:id`, permitir('editarCatalogos'), async (req, res) => {
     const doc = await Model.findById(req.params.id);
     if (!doc) return res.status(404).json({ message: 'No encontrado' });
     try {
       await aplicar(doc, req.body).save();
+      await exclusivas(doc);
       audit('editar', Model.modelName, doc._id, req.user, doc.nombre);
       res.json(doc);
     } catch (e) {

@@ -9,6 +9,7 @@ import { useMapa } from '../store';
 import MapaView from '../components/MapaView';
 import FichaEdificio from '../components/FichaEdificio';
 import { useAuth } from '../auth';
+import { can } from '../utils/permisos';
 
 interface Calle { calleNorm: string; calle: string; cantidad: number }
 
@@ -23,6 +24,7 @@ export default function MapaPage() {
   const [aviso, setAviso] = useState('');
   const [error, setError] = useState('');
   const [posNueva, setPosNueva] = useState<[number, number] | null>(null);
+  const [geo, setGeo] = useState({ pendientes: 0, total: 0 });
 
   // Abrir un edificio desde otra pantalla (/?ver=ID&mover=1)
   useEffect(() => {
@@ -43,6 +45,23 @@ export default function MapaPage() {
       .then((r) => { setPuntos(r.data.puntos); setResumen({ total: r.data.total, sinUbicar: r.data.sinUbicar }); setError(''); })
       .catch((e) => setError(errMsg(e)));
   }, [filtros, version]);
+
+  // Mientras se ubican direcciones, consulta el avance y recarga los puntos cuando cambia
+  useEffect(() => {
+    let vivo = true;
+    let ultimo = -1;
+    const tick = () =>
+      api.get('/geocodificar/progreso').then((r) => {
+        if (!vivo) return;
+        const total = Object.values(r.data.porEstado as Record<string, number>).reduce((a, b) => a + b, 0);
+        setGeo({ pendientes: r.data.pendientes, total });
+        if (ultimo !== -1 && r.data.pendientes !== ultimo) refrescar();
+        ultimo = r.data.pendientes;
+      }).catch(() => {});
+    tick();
+    const id = setInterval(tick, 4000);
+    return () => { vivo = false; clearInterval(id); };
+  }, [refrescar]);
 
   const claveFiltros = useMemo(() => JSON.stringify(filtros), [filtros]);
   const cuenta = useMemo(() => {
@@ -65,7 +84,7 @@ export default function MapaPage() {
   }, [seleccionado, setMoviendo, refrescar]);
 
   const puntoSel = puntos.find((p) => p.id === seleccionado);
-  const puedeEditar = user?.role !== 'Consulta';
+  const puedeEditar = can(user?.role, 'editarEdificios');
 
   return (
     <Box sx={{ display: 'flex', height: '100%', position: 'relative' }}>
@@ -93,6 +112,11 @@ export default function MapaPage() {
           <TextField select size="small" label="Calidad de ubicación" value={filtros.geoEstado} onChange={(e) => setFiltro('geoEstado', e.target.value)}>
             <MenuItem value="">Todas</MenuItem>
             {Object.entries(GEO_LABEL).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
+          </TextField>
+          <TextField select size="small" label="Infracciones" value={filtros.conInfraccion} onChange={(e) => setFiltro('conInfraccion', e.target.value)}>
+            <MenuItem value="">Todos los edificios</MenuItem>
+            <MenuItem value="si">Con infracciones cargadas</MenuItem>
+            <MenuItem value="no">Sin infracciones</MenuItem>
           </TextField>
           <Button size="small" onClick={() => { limpiar(); setTextoCalle(''); }}>Limpiar filtros</Button>
           <Divider />
@@ -123,6 +147,11 @@ export default function MapaPage() {
           onSelect={(id) => { seleccionar(id); setPosNueva(null); }}
           onMover={mover}
         />
+        {geo.pendientes > 0 && (
+          <Alert severity="info" sx={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000 }}>
+            Ubicando direcciones: {geo.total - geo.pendientes} de {geo.total}. Los puntos aparecen a medida que se encuentran.
+          </Alert>
+        )}
         {moviendo && (
           <Alert severity="info" sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1000 }}
             action={<Button color="inherit" size="small" onClick={() => setMoviendo(false)}>Cancelar</Button>}>

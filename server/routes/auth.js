@@ -27,6 +27,13 @@ router.get('/me', protect, (req, res) => res.json(publico(req.user)));
 
 // ---- Gestión de usuarios (solo Administrador) ----
 const users = require('express').Router();
+
+// Usuarios a los que se puede asignar una infracción (cualquier usuario autenticado)
+users.get('/asignables', protect, async (req, res) => {
+  const lista = await User.find({ activo: true }).sort('apellidos nombres');
+  res.json(lista.map((u) => ({ id: u._id, nombres: u.nombres, apellidos: u.apellidos, role: u.role })));
+});
+
 users.use(protect, authorize());
 
 users.get('/', async (req, res) => res.json(await User.find().sort('apellidos')));

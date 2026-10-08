@@ -31,6 +31,7 @@ app.use('/api/auth', auth);
 app.use('/api/users', users);
 app.use('/api/catalogos', require('./routes/catalogos'));
 app.use('/api/edificios', require('./routes/edificios'));
+app.use('/api/infracciones', require('./routes/infracciones'));
 app.use('/api/importar', require('./routes/importar'));
 app.use('/api/geocodificar', require('./routes/geocodificar'));
 app.use('/api/admin', require('./routes/admin'));

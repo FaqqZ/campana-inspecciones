@@ -6,7 +6,7 @@ import {
 import { api, errMsg } from '../api';
 import { useAuth } from '../auth';
 
-type Tipo = 'edificios' | 'actas' | 'cruce';
+type Tipo = 'edificios' | 'infracciones' | 'cruce';
 interface FilaPrev { fila: number; direccion: string; errores: string[]; avisos: string[]; unida: boolean; nuevos: { motivos: string[] } }
 interface Prev { total: number; validas: number; conErrores: number; unidas?: number; conAvisos?: number; certificados?: number; filas: FilaPrev[] }
 interface Progreso { corriendo: boolean; pendientes: number; porEstado: Record<string, number>; ultimoError: string }
@@ -18,6 +18,7 @@ export default function ImportarPage() {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [prev, setPrev] = useState<Prev | null>(null);
   const [crearCatalogos, setCrearCatalogos] = useState(false);
+  const [crearEdificios, setCrearEdificios] = useState(true);
   const [lote, setLote] = useState<{ id: string; tipo: Tipo; importadas: number } | null>(null);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
@@ -38,6 +39,7 @@ export default function ImportarPage() {
     const f = new FormData();
     f.append('archivo', archivo!);
     f.append('crearCatalogos', String(crearCatalogos));
+    f.append('crearEdificios', String(crearEdificios));
     return f;
   };
 
@@ -64,8 +66,8 @@ export default function ImportarPage() {
     try {
       const r = await api.post(`/importar/${tipo}/confirmar`, form());
       setLote({ id: r.data.lote, tipo, importadas: r.data.importadas });
-      const extra = [r.data.unidas ? `${r.data.unidas} repetidas unidas` : '', r.data.conCertificado !== undefined ? `${r.data.conCertificado} con certificado final` : '', r.data.omitidas ? `${r.data.omitidas} omitidas por errores` : ''].filter(Boolean).join(', ');
-      setMsg(`Se importaron ${r.data.importadas} ${tipo === 'actas' ? 'filas' : 'edificios'}${extra ? ` (${extra})` : ''}.`);
+      const extra = [r.data.unidas ? `${r.data.unidas} repetidas unidas` : '', r.data.conCertificado !== undefined ? `${r.data.conCertificado} con certificado final` : '', r.data.edificiosCreados ? `${r.data.edificiosCreados} edificios nuevos` : '', r.data.omitidas ? `${r.data.omitidas} omitidas por errores` : ''].filter(Boolean).join(', ');
+      setMsg(`Se importaron ${r.data.importadas} ${tipo === 'infracciones' ? 'infracciones' : 'edificios'}${extra ? ` (${extra})` : ''}.`);
       setPrev(null); setArchivo(null);
       if (input.current) input.current.value = '';
     } catch (e) { setError(errMsg(e)); }
@@ -90,12 +92,12 @@ export default function ImportarPage() {
         <Typography variant="h5">Importar desde Excel</Typography>
         <ToggleButtonGroup exclusive value={tipo} onChange={(_, v) => { if (v) { setTipo(v); setPrev(null); setMsg(''); } }} size="small">
           <ToggleButton value="edificios">Edificios (direcciones)</ToggleButton>
-          <ToggleButton value="actas">Actas y expedientes</ToggleButton>
+          <ToggleButton value="infracciones">Infracciones</ToggleButton>
           <ToggleButton value="cruce">Cruce Catastro / Defensa Civil</ToggleButton>
         </ToggleButtonGroup>
         <Alert severity="info">
           {tipo === 'edificios' && 'Cargá un .xlsx con las columnas Calle y Número (o una sola columna "Dirección completa"). Después de importar, las direcciones se ubican solas en el mapa.'}
-          {tipo === 'actas' && 'Vinculá actas o expedientes ya existentes a edificios cargados. Se asocian por Calle + Número, así que primero importá los edificios.'}
+          {tipo === 'infracciones' && 'Cargá infracciones en lote. Cada una se asocia al edificio por Calle + Número. Los inspectores, motivos, estados y oficinas se buscan por nombre en los catálogos; si el estado o la oficina van vacíos, se usan los iniciales.'}
           {tipo === 'cruce' && 'Subí el Excel del cruce tal cual está: se ignoran el resumen y las notas, se traducen los nombres de calle de Catastro, se toma la primera altura y se registra el certificado final de Defensa Civil de cada edificio.'}
         </Alert>
         {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
@@ -108,8 +110,11 @@ export default function ImportarPage() {
               {archivo ? archivo.name : 'Elegir archivo .xlsx'}
               <input ref={input} hidden type="file" accept=".xlsx" onChange={(e) => { setArchivo(e.target.files?.[0] ?? null); setPrev(null); }} />
             </Button>
-            {tipo === 'actas' && esAdmin && (
-              <FormControlLabel control={<Switch checked={crearCatalogos} onChange={(e) => setCrearCatalogos(e.target.checked)} />} label="Crear motivos que no existan" />
+            {tipo === 'infracciones' && (
+              <FormControlLabel control={<Switch checked={crearEdificios} onChange={(e) => { setCrearEdificios(e.target.checked); setPrev(null); }} />} label="Crear los edificios que falten" />
+            )}
+            {tipo === 'infracciones' && esAdmin && (
+              <FormControlLabel control={<Switch checked={crearCatalogos} onChange={(e) => { setCrearCatalogos(e.target.checked); setPrev(null); }} />} label="Crear inspectores y motivos que no existan" />
             )}
             <Button variant="contained" disabled={!archivo || busy} onClick={previsualizar}>Previsualizar</Button>
           </Stack>
@@ -125,7 +130,7 @@ export default function ImportarPage() {
               {!!prev.conAvisos && <Chip color="warning" label={`${prev.conAvisos} con avisos`} />}
               {tipo === 'cruce' && <Chip variant="outlined" label={`${prev.certificados ?? 0} con certificado final`} />}
               <Box sx={{ flex: 1 }} />
-              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'actas' ? 'filas' : 'edificios'}</Button>
+              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'infracciones' ? 'infracciones' : 'edificios'}</Button>
             </Stack>
             <Table size="small">
               <TableHead><TableRow><TableCell width={70}>Fila</TableCell><TableCell>Dirección</TableCell><TableCell>Resultado</TableCell></TableRow></TableHead>

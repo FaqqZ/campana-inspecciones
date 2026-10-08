@@ -1,8 +1,8 @@
 const router = require('express').Router();
 const crypto = require('crypto');
 const multer = require('multer');
-const { Edificio, ActaVinculada, DocumentoEdificio, Inspeccion, MotivoInfraccion, TipoDocumento, norm } = require('../models');
-const { protect, authorize, audit } = require('../middleware/auth');
+const { Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
+const { protect, authorize, permitir, audit } = require('../middleware/auth');
 const { generarPlantilla, leerHoja, leerCruce, validarFilas } = require('../services/importador');
 const { TIPO_CERT, MOTIVO_CERT } = require('../services/catastro');
 const { campanaDe } = require('../services/edificios');
@@ -19,7 +19,7 @@ const upload = multer({
 router.use(protect);
 
 const tipoValido = (req, res, next) =>
-  ['edificios', 'actas', 'cruce'].includes(req.params.tipo) ? next() : res.status(404).json({ message: 'Tipo inexistente' });
+  ['edificios', 'infracciones', 'cruce'].includes(req.params.tipo) ? next() : res.status(404).json({ message: 'Tipo inexistente' });
 
 router.get('/plantilla/:tipo', tipoValido, (req, res) => {
   if (req.params.tipo === 'cruce') return res.status(404).json({ message: 'El cruce se carga con el archivo tal cual, sin plantilla' });
@@ -52,15 +52,23 @@ async function preparar(req) {
     const ex = await Edificio.find({ campana }, 'direccionNorm').lean();
     ctx = { existentes: new Set(ex.map((e) => e.direccionNorm)) };
   } else {
-    const [edif, mot, actas] = await Promise.all([
+    const [edif, mot, insp, est, ofi, exist] = await Promise.all([
       Edificio.find({ campana }, 'direccionNorm').lean(),
       MotivoInfraccion.find({ activo: true }),
-      ActaVinculada.find({}, 'edificio tipo numero').lean(),
+      Inspector.find({ activo: true }),
+      Estado.find({ activo: true }),
+      Oficina.find({ activo: true }),
+      Infraccion.find({}, 'numeroActa').lean(),
     ]);
+    const mapa = (docs) => new Map(docs.map((d) => [d.nombreNorm, d._id]));
     ctx = {
       edificios: new Map(edif.map((e) => [e.direccionNorm, String(e._id)])),
-      motivos: new Map(mot.map((m) => [m.nombreNorm, m._id])),
-      existentes: new Set(actas.map((a) => `${a.edificio}|${a.tipo}|${a.numero}`)),
+      motivos: mapa(mot),
+      inspectores: mapa(insp),
+      estados: mapa(est),
+      oficinas: mapa(ofi),
+      existentes: new Set(exist.map((a) => a.numeroActa)),
+      crearEdificios: req.body.crearEdificios === 'true',
       permitirNuevos: req.user.role === 'Administrador' && req.body.crearCatalogos === 'true',
     };
   }
@@ -69,7 +77,7 @@ async function preparar(req) {
 
 const resumir = (r) => ({
   fila: r.fila,
-  direccion: r.data?.direccionOriginal || r.data?.direccion || '',
+  direccion: r.data?.direccionOriginal || '',
   numero: r.data?.numero,
   errores: r.errores,
   avisos: r.avisos || [],
@@ -77,7 +85,7 @@ const resumir = (r) => ({
   nuevos: r.nuevos,
 });
 
-router.post('/:tipo/previsualizar', tipoValido, authorize('Carga'), subir, async (req, res) => {
+router.post('/:tipo/previsualizar', tipoValido, permitir('importar'), subir, async (req, res) => {
   try {
     const { resultado } = await preparar(req);
     const validas = resultado.filter((r) => !r.errores.length).length;
@@ -96,7 +104,7 @@ router.post('/:tipo/previsualizar', tipoValido, authorize('Carga'), subir, async
   }
 });
 
-router.post('/:tipo/confirmar', tipoValido, authorize('Carga'), subir, async (req, res) => {
+router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (req, res) => {
   let prep;
   try {
     prep = await preparar(req);
@@ -161,49 +169,84 @@ router.post('/:tipo/confirmar', tipoValido, authorize('Carga'), subir, async (re
     return res.status(201).json({ lote, importadas: docs.length, omitidas: resultado.length - docs.length, geocodificando: true });
   }
 
-  // actas: dar de alta los motivos nuevos (solo Administrador con crearCatalogos)
-  const nuevos = [...new Set(validas.flatMap((r) => r.nuevos.motivos))];
-  for (const nombre of nuevos) {
-    const m = await MotivoInfraccion.findOneAndUpdate(
-      { nombreNorm: norm(nombre) },
-      { $setOnInsert: { nombre, nombreNorm: norm(nombre) }, $set: { activo: true } },
-      { upsert: true, new: true }
-    );
-    ctx.motivos.set(norm(nombre), m._id);
-  }
-  const docs = validas.map((r) => ({
-    edificio: r.data.edificio,
-    numero: r.data.numero,
-    tipo: r.data.tipo,
-    fecha: r.data.fecha,
-    motivos: r.data.motivosNombres.map((n) => ctx.motivos.get(norm(n))).filter(Boolean),
-    estado: r.data.estado,
-    observaciones: r.data.observaciones,
-    origen: 'excel',
-    lotImportacion: lote,
-  }));
-  await ActaVinculada.insertMany(docs, { ordered: false });
-  audit('importar', 'ActaVinculada', lote, req.user, `${docs.length} actas`);
-  res.status(201).json({ lote, importadas: docs.length, omitidas: resultado.length - docs.length });
+  // infracciones
+  const [estadoIni, oficinaIni] = await Promise.all([Estado.findOne({ esInicial: true }), Oficina.findOne({ esInicial: true })]);
+  if (!estadoIni || !oficinaIni)
+    return res.status(409).json({ message: 'Falta definir el estado y la oficina iniciales en Catálogos' });
+
+  // catálogos nuevos (solo Administrador con crearCatalogos)
+  const alta = async (Model, nombres, mapa) => {
+    for (const nombre of [...new Set(nombres)]) {
+      const d = await Model.findOneAndUpdate(
+        { nombreNorm: norm(nombre) },
+        { $setOnInsert: { nombre, nombreNorm: norm(nombre) }, $set: { activo: true } },
+        { upsert: true, new: true }
+      );
+      mapa.set(norm(nombre), d._id);
+    }
+  };
+  await alta(MotivoInfraccion, validas.flatMap((r) => r.nuevos.motivos), ctx.motivos);
+  await alta(Inspector, validas.flatMap((r) => r.nuevos.inspectores), ctx.inspectores);
+
+  // edificios que faltan (se ubican después con la geocodificación)
+  const faltan = new Map();
+  validas.forEach((r) => { if (r.data.crearEdificio) faltan.set(r.data.dir.direccionNorm, r.data.dir); });
+  const creados = faltan.size
+    ? await Edificio.insertMany([...faltan.values()].map((d) => ({ ...d, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id })), { ordered: false })
+    : [];
+  creados.forEach((e) => ctx.edificios.set(e.direccionNorm, String(e._id)));
+
+  const docs = validas.map(({ data: d }) => {
+    const estado = d.estado || estadoIni._id;
+    const oficina = d.oficina || oficinaIni._id;
+    return {
+      numeroActa: d.numeroActa,
+      edificio: d.edificio || ctx.edificios.get(d.dir.direccionNorm),
+      infractor: d.infractor,
+      inspectoresActuantes: d.inspectoresNombres.map((n) => ctx.inspectores.get(norm(n))),
+      motivosInfraccion: d.motivosNombres.map((n) => ctx.motivos.get(norm(n))),
+      fechaInfraccion: d.fechaInfraccion,
+      estado,
+      oficinaActual: oficina,
+      observaciones: Boolean(d.observaciones),
+      detalleObservaciones: d.observaciones,
+      historialMovimientos: [{ oficinaDestino: oficina, estado, por: req.user._id, comentarios: 'Importada desde Excel' }],
+      origen: 'excel',
+      lotImportacion: lote,
+      creadoPor: req.user._id,
+    };
+  });
+  await Infraccion.insertMany(docs, { ordered: false });
+  audit('importar', 'Infraccion', lote, req.user, `${docs.length} infracciones, ${creados.length} edificios nuevos`);
+  if (creados.length) procesarPendientes({ campana });
+  res.status(201).json({ lote, importadas: docs.length, edificiosCreados: creados.length, omitidas: resultado.length - docs.length, geocodificando: creados.length > 0 });
 });
 
 // Revertir un lote. Los edificios con datos cargados después no se pueden revertir.
 router.delete('/:tipo/lote/:lote', tipoValido, authorize(), async (req, res) => {
   const { tipo, lote } = req.params;
-  if (tipo === 'actas') {
-    const r = await ActaVinculada.deleteMany({ lotImportacion: lote });
-    audit('revertir-lote', 'ActaVinculada', lote, req.user, `${r.deletedCount} eliminadas`);
-    return res.json({ eliminadas: r.deletedCount });
+  if (tipo === 'infracciones') {
+    const r = await Infraccion.deleteMany({ lotImportacion: lote, 'historialMovimientos.1': { $exists: false }, 'expediente.numero': '' });
+    const total = await Infraccion.countDocuments({ lotImportacion: lote });
+    if (total) return res.status(409).json({ message: `${total} infracciones del lote ya tuvieron pases o expediente y no se revierten`, eliminadas: r.deletedCount });
+    // edificios creados por este lote que quedaron sin datos
+    const nuevos = await Edificio.find({ lotImportacion: lote }, '_id').lean();
+    const ids = nuevos.map((e) => e._id);
+    const usados = await Infraccion.distinct('edificio', { edificio: { $in: ids } });
+    const libres = ids.filter((id) => !usados.some((u) => String(u) === String(id)));
+    const e = await Edificio.deleteMany({ _id: { $in: libres }, lotImportacion: lote });
+    audit('revertir-lote', 'Infraccion', lote, req.user, `${r.deletedCount} infracciones, ${e.deletedCount} edificios`);
+    return res.json({ eliminadas: r.deletedCount, edificiosEliminados: e.deletedCount });
   }
   const ids = (await Edificio.find({ lotImportacion: lote }, '_id').lean()).map((e) => e._id);
   if (!ids.length) return res.status(404).json({ message: 'Lote inexistente' });
   const [docs, actas, insp] = await Promise.all([
     DocumentoEdificio.exists({ edificio: { $in: ids }, lotImportacion: { $ne: lote } }),
-    ActaVinculada.exists({ edificio: { $in: ids } }),
+    Infraccion.exists({ edificio: { $in: ids } }),
     Inspeccion.exists({ edificio: { $in: ids } }),
   ]);
   if (docs || actas || insp)
-    return res.status(409).json({ message: 'Hay edificios del lote con documentación, actas o inspecciones cargadas' });
+    return res.status(409).json({ message: 'Hay edificios del lote con documentación, infracciones o inspecciones cargadas' });
   await DocumentoEdificio.deleteMany({ edificio: { $in: ids }, lotImportacion: lote });
   const r = await Edificio.deleteMany({ lotImportacion: lote });
   audit('revertir-lote', 'Edificio', lote, req.user, `${r.deletedCount} eliminados`);

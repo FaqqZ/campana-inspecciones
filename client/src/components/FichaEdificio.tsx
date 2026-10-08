@@ -7,8 +7,11 @@ import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import PlaceIcon from '@mui/icons-material/EditLocationAlt';
 import {
-  api, errMsg, Ficha, FichaDocumento, fmtFecha, isoDia, Inspector, Motivo, EstadoInspeccion,
+  api, errMsg, Ficha, FichaDocumento, fmtFecha, isoDia, Inspector, EstadoInspeccion,
 } from '../api';
+import { useAuth } from '../auth';
+import { can } from '../utils/permisos';
+import InfraccionForm from './InfraccionForm';
 import { GEO_LABEL, INSPECCION_LABEL, SEMAFORO } from '../semaforo';
 import { useMapa } from '../store';
 
@@ -70,9 +73,10 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
   const [tab, setTab] = useState(0);
   const [error, setError] = useState('');
   const [datos, setDatos] = useState({ titular: '', uso: '', observaciones: '' });
-  const [motivos, setMotivos] = useState<Motivo[]>([]);
   const [inspectores, setInspectores] = useState<Inspector[]>([]);
-  const [acta, setActa] = useState({ numero: '', tipo: 'acta', fecha: '', motivos: [] as string[], estado: '' });
+  const { user } = useAuth();
+  const puedeInfraccion = can(user?.role, 'editarInfracciones');
+  const [formInf, setFormInf] = useState<{ abierto: boolean; motivos: string[] }>({ abierto: false, motivos: [] });
   const [visita, setVisita] = useState({ fecha: hoyIso(), inspector: '', resultado: 'inspeccionado', observaciones: '' });
 
   const cargar = useCallback(async () => {
@@ -88,7 +92,6 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
 
   useEffect(() => { setFicha(null); setTab(0); cargar(); }, [cargar]);
   useEffect(() => {
-    api.get('/catalogos/motivos').then((r) => setMotivos(r.data)).catch(() => {});
     api.get('/catalogos/inspectores').then((r) => setInspectores(r.data)).catch(() => {});
   }, []);
 
@@ -125,7 +128,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Datos" />
         <Tab label="Papeles" />
-        <Tab label={`Actas${ficha ? ` (${ficha.actas.length})` : ''}`} />
+        <Tab label={`Infracciones${ficha ? ` (${ficha.infracciones.length})` : ''}`} />
         <Tab label={`Visitas${ficha ? ` (${ficha.inspecciones.length})` : ''}`} />
       </Tabs>
 
@@ -173,6 +176,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
                     <Typography variant="caption" display="block">
                       {i.documento}: {i.estado === 'vencido' ? 'vencido' : 'no presentado'}
                     </Typography>
+                    {puedeInfraccion && <Button size="small" sx={{ mt: 0.5 }} onClick={() => setFormInf({ abierto: true, motivos: [i.motivo._id] })}>Registrar infracción</Button>}
                   </Alert>
                 ))}
                 <Typography variant="caption" color="text.secondary">Son sugerencias según los papeles requeridos; no son actas labradas.</Typography>
@@ -192,42 +196,25 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
 
         {ficha && e && tab === 2 && (
           <Stack spacing={1.5}>
-            {ficha.actas.length === 0 && <Typography variant="body2" color="text.secondary">Sin actas ni expedientes vinculados.</Typography>}
-            {ficha.actas.map((a) => (
+            {ficha.infracciones.length === 0 && <Typography variant="body2" color="text.secondary">Este edificio no tiene infracciones cargadas.</Typography>}
+            {ficha.infracciones.map((a) => (
               <Paper key={a._id} sx={{ p: 1.5 }}>
-                <Stack direction="row" alignItems="flex-start">
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="body2" fontWeight={600}>{a.tipo === 'acta' ? 'Acta' : 'Expediente'} {a.numero} · {fmtFecha(a.fecha)}</Typography>
-                    <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', mt: 0.5, rowGap: 0.5 }}>
-                      {a.motivos.map((m) => <Chip key={m._id} size="small" label={m.nombre} />)}
-                    </Stack>
-                    {a.estado && <Typography variant="caption" color="text.secondary">Estado: {a.estado}</Typography>}
-                  </Box>
-                  {puedeEditar && (
-                    <IconButton size="small" aria-label="Eliminar" onClick={() => window.confirm('¿Eliminar este registro?') && accion(() => api.delete(`/edificios/${id}/actas/${a._id}`))}><DeleteIcon fontSize="small" /></IconButton>
-                  )}
+                <Stack spacing={0.6}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography variant="body2" fontWeight={600} sx={{ flex: 1 }}>Acta {a.numeroActa} · {fmtFecha(a.fechaInfraccion)}</Typography>
+                    <Chip size="small" color={a.expediente?.numero ? 'success' : a.estado.requiereComentario ? 'warning' : 'default'} label={a.expediente?.numero ? `Exp. ${a.expediente.numero}` : a.estado.nombre} />
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+                    {a.motivosInfraccion.map((m) => <Chip key={m._id} size="small" variant="outlined" label={m.nombre} />)}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    {a.oficinaActual.nombre} · {a.inspectoresActuantes.map((i) => i.nombre).join(', ')}{a.infractor ? ` · ${a.infractor}` : ''}
+                  </Typography>
                 </Stack>
               </Paper>
             ))}
-            {puedeEditar && (
-              <>
-                <Divider />
-                <Typography variant="subtitle2">Vincular acta o expediente</Typography>
-                <Stack direction="row" spacing={1}>
-                  <TextField select size="small" label="Tipo" value={acta.tipo} onChange={(ev) => setActa({ ...acta, tipo: ev.target.value })} sx={{ width: 140 }}>
-                    <MenuItem value="acta">Acta</MenuItem>
-                    <MenuItem value="expediente">Expediente</MenuItem>
-                  </TextField>
-                  <TextField size="small" label="Número" value={acta.numero} onChange={(ev) => setActa({ ...acta, numero: ev.target.value })} sx={{ flex: 1 }} />
-                </Stack>
-                <TextField size="small" type="date" label="Fecha" InputLabelProps={{ shrink: true }} value={acta.fecha} onChange={(ev) => setActa({ ...acta, fecha: ev.target.value })} />
-                <TextField select size="small" label="Motivos" SelectProps={{ multiple: true }} value={acta.motivos} onChange={(ev) => setActa({ ...acta, motivos: ev.target.value as unknown as string[] })}>
-                  {motivos.map((m) => <MenuItem key={m._id} value={m._id}>{m.nombre}</MenuItem>)}
-                </TextField>
-                <TextField size="small" label="Estado" value={acta.estado} onChange={(ev) => setActa({ ...acta, estado: ev.target.value })} />
-                <Button variant="contained" disabled={!acta.numero.trim()} onClick={() => accion(async () => { await api.post(`/edificios/${id}/actas`, acta); setActa({ numero: '', tipo: 'acta', fecha: '', motivos: [], estado: '' }); })}>Vincular</Button>
-              </>
-            )}
+            {puedeInfraccion && <Button variant="contained" onClick={() => setFormInf({ abierto: true, motivos: [] })}>Cargar infracción</Button>}
+            <Typography variant="caption" color="text.secondary">Para editar, hacer pases o generar el expediente usá la sección Infracciones.</Typography>
           </Stack>
         )}
 
@@ -269,6 +256,15 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
           </Stack>
         )}
       </Box>
+      {e && (
+        <InfraccionForm
+          open={formInf.abierto}
+          edificio={{ id, direccion: e.direccionOriginal }}
+          motivosIniciales={formInf.motivos}
+          onClose={() => setFormInf({ abierto: false, motivos: [] })}
+          onSaved={() => { setFormInf({ abierto: false, motivos: [] }); setTab(2); tras(); }}
+        />
+      )}
     </Paper>
   );
 }

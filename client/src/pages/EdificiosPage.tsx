@@ -4,7 +4,8 @@ import {
   Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Pagination, Paper, Stack, Table, TableBody, TableCell,
   TableHead, TableRow, TextField, Typography,
 } from '@mui/material';
-import { api, Edificio, errMsg, puedeCargar } from '../api';
+import { api, Edificio, errMsg } from '../api';
+import { can } from '../utils/permisos';
 import { GEO_LABEL, INSPECCION_LABEL, SEMAFORO } from '../semaforo';
 import { useAuth } from '../auth';
 import { useMapa } from '../store';
@@ -100,8 +101,8 @@ export default function EdificiosPage() {
               {Object.entries(GEO_LABEL).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
             </TextField>
             <Box sx={{ flex: 1 }} />
-            {puedeCargar(user?.role) && <Button variant="contained" onClick={() => setNuevo({ calle: '', numero: '', titular: '', uso: '', observaciones: '' })}>Agregar edificio</Button>}
-            {puedeCargar(user?.role) && (resumen?.porGeo.fallido || 0) > 0 && <Button onClick={reintentar}>Reintentar no encontradas</Button>}
+            {can(user?.role, 'editarEdificios') && <Button variant="contained" onClick={() => setNuevo({ calle: '', numero: '', titular: '', uso: '', observaciones: '' })}>Agregar edificio</Button>}
+            {can(user?.role, 'editarEdificios') && (resumen?.porGeo.fallido || 0) > 0 && <Button onClick={reintentar}>Reintentar no encontradas</Button>}
           </Stack>
           <Table size="small">
             <TableHead>
@@ -119,7 +120,7 @@ export default function EdificiosPage() {
                   <TableCell>{INSPECCION_LABEL[e.estadoInspeccion]}</TableCell>
                   <TableCell align="right">
                     {e.lat !== null && <Button size="small" onClick={() => { seleccionar(e._id); nav('/'); }}>Ver ficha</Button>}
-                    {puedeCargar(user?.role) && ['fallido', 'aproximado', 'pendiente'].includes(e.geoEstado) && (
+                    {can(user?.role, 'editarEdificios') && ['fallido', 'aproximado', 'pendiente'].includes(e.geoEstado) && (
                       <Button size="small" onClick={() => ubicar(e._id)}>{e.lat === null ? 'Ubicar' : 'Corregir'}</Button>
                     )}
                   </TableCell>

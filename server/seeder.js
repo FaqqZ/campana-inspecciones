@@ -3,6 +3,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const { User, Campana } = require('./models');
+const { migrar } = require('./migrateInfracciones');
 
 (async () => {
   await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/campana-inspecciones');
@@ -19,6 +20,7 @@ const { User, Campana } = require('./models');
     await Campana.create({ nombre: `Campaña ${new Date().getFullYear()}`, descripcion: 'Relevamiento general de edificios' });
     console.log('Campaña inicial creada.');
   }
+  await migrar();
   await mongoose.disconnect();
 })().catch((e) => {
   console.error(e);

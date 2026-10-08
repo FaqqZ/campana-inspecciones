@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { User, AuditLog } = require('../models');
+const { tienePermiso } = require('../config/permisos');
 
 const protect = async (req, res, next) => {
   const header = req.headers.authorization || '';
@@ -25,9 +26,16 @@ const authorize =
     res.status(403).json({ message: 'Usted no tiene permisos para realizar esta acción' });
   };
 
+// Autoriza según la matriz de config/permisos.js
+const permitir = (accion) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: 'No autenticado' });
+  if (tienePermiso(req.user.role, accion)) return next();
+  res.status(403).json({ message: 'Usted no tiene permisos para realizar esta acción' });
+};
+
 const audit = (accion, entidad, entidadId, usuario, detalle = '') =>
   AuditLog.create({ accion, entidad, entidadId: String(entidadId || ''), usuario: usuario?._id, detalle }).catch(
     () => {}
   );
 
-module.exports = { protect, authorize, audit };
+module.exports = { protect, authorize, permitir, audit };

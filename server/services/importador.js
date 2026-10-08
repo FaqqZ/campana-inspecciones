@@ -11,14 +11,16 @@ const COLUMNAS = {
     { key: 'direccion', header: 'Dirección completa', ejemplo: '', alias: ['direccion', 'domicilio'] },
     { key: 'observaciones', header: 'Observaciones', ejemplo: '' },
   ],
-  actas: [
-    { key: 'numero', header: 'N° Acta', required: true, ejemplo: 'A-0001', alias: ['numero acta', 'acta', 'n acta'] },
-    { key: 'tipo', header: 'Tipo', ejemplo: 'acta', alias: [] },
-    { key: 'fecha', header: 'Fecha', ejemplo: '15/09/2026', alias: [] },
+  infracciones: [
+    { key: 'numeroActa', header: 'N° Acta', required: true, ejemplo: 'A-0001', alias: ['numero acta', 'acta', 'n acta', 'numero'] },
+    { key: 'fecha', header: 'Fecha infracción', required: true, ejemplo: '15/09/2026', alias: ['fecha'] },
     { key: 'calle', header: 'Calle', required: true, ejemplo: 'Mate de Luna', alias: [] },
     { key: 'altura', header: 'Número', ejemplo: '1234', alias: ['numero', 'nro', 'altura'] },
-    { key: 'motivos', header: 'Motivos', ejemplo: 'Falta de habilitación; Salida de emergencia', alias: ['motivo'] },
-    { key: 'estado', header: 'Estado', ejemplo: '', alias: [] },
+    { key: 'infractor', header: 'Infractor', ejemplo: 'Razón social o nombre', alias: ['razon social', 'nombre'] },
+    { key: 'inspectores', header: 'Inspectores', required: true, ejemplo: 'Pérez Juan; Gómez Ana', alias: ['inspector'] },
+    { key: 'motivos', header: 'Motivos', required: true, ejemplo: 'Falta de habilitación; Salida de emergencia', alias: ['motivo'] },
+    { key: 'estado', header: 'Estado', ejemplo: 'Ingresado (vacío = estado inicial)', alias: [] },
+    { key: 'oficina', header: 'Oficina', ejemplo: 'Oficina Técnica (vacío = oficina inicial)', alias: [] },
     { key: 'observaciones', header: 'Observaciones', ejemplo: '' },
   ],
 };
@@ -67,7 +69,7 @@ function generarPlantilla(tipo) {
   const ws = XLSX.utils.aoa_to_sheet([cols.map((c) => c.header), cols.map((c) => c.ejemplo)]);
   ws['!cols'] = cols.map((c) => ({ wch: Math.max(c.header.length, String(c.ejemplo).length) + 4 }));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, tipo === 'edificios' ? 'Edificios' : 'Actas');
+  XLSX.utils.book_append_sheet(wb, ws, tipo === 'edificios' ? 'Edificios' : 'Infracciones');
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
@@ -177,8 +179,8 @@ function validarCruce(filas, ctx) {
 /**
  * Valida filas leídas. Función pura.
  * edificios: ctx { existentes:Set(direccionNorm) }
- * actas:     ctx { edificios:Map(direccionNorm->id), motivos:Map(norm->id),
- *                  existentes:Set("edificioId|tipo|numero"), permitirNuevos }
+ * infracciones: ctx { edificios:Map(direccionNorm->id), inspectores/motivos/estados/oficinas:Map(norm->id),
+ *                  existentes:Set(numeroActa), crearEdificios, permitirNuevos }
  * Devuelve [{ fila, data, errores[], nuevos:{motivos[]} }]
  */
 function validarFilas(tipo, filas, ctx) {
@@ -188,7 +190,8 @@ function validarFilas(tipo, filas, ctx) {
   return filas.map((raw, i) => {
     const fila = i + 2; // fila 1 = encabezados
     const errores = [];
-    const nuevos = { motivos: [] };
+    const avisos = [];
+    const nuevos = { motivos: [], inspectores: [] };
     const v = valoresDeFila(raw, cols);
     const obs = String(v.observaciones).trim();
 
@@ -199,46 +202,70 @@ function validarFilas(tipo, filas, ctx) {
         else if (vistos.has(dir.direccionNorm)) errores.push(`${dir.direccionOriginal} repetida en el archivo`);
         vistos.add(dir.direccionNorm);
       }
-      return { fila, data: dir ? { ...dir, observaciones: obs } : null, errores, nuevos };
+      return { fila, data: dir ? { ...dir, observaciones: obs } : null, errores, avisos, nuevos };
     }
 
-    // actas
-    const numero = String(v.numero).trim();
-    if (!numero) errores.push('N° Acta es obligatorio');
-    const t = norm(v.tipo) || 'acta';
-    if (!['acta', 'expediente'].includes(t)) errores.push('Tipo debe ser "acta" o "expediente"');
+    // infracciones
+    const numeroActa = String(v.numeroActa).trim();
+    if (numeroActa.length < 3 || numeroActa.length > 50) errores.push('N° Acta debe tener entre 3 y 50 caracteres');
+    else if (ctx.existentes.has(numeroActa)) errores.push(`El acta ${numeroActa} ya existe`);
+    else if (vistos.has(numeroActa)) errores.push(`El acta ${numeroActa} está repetida en el archivo`);
+    vistos.add(numeroActa);
+
     const fecha = parseFecha(v.fecha);
-    if (fecha === undefined) errores.push('Fecha inválida (usar dd/mm/aaaa)');
+    if (fecha === null) errores.push('Fecha infracción es obligatoria');
+    else if (fecha === undefined) errores.push('Fecha infracción inválida (usar dd/mm/aaaa)');
 
     const dir = resolverDireccion(v.calle, v.altura, '', errores);
     let edificio = null;
+    let crearEdificio = false;
     if (dir) {
       edificio = ctx.edificios.get(dir.direccionNorm) || null;
-      if (!edificio) errores.push(`No existe un edificio en ${dir.direccionOriginal}`);
-    }
-    if (numero && edificio) {
-      const clave = `${edificio}|${t}|${numero}`;
-      if (ctx.existentes.has(clave)) errores.push(`${t} ${numero} ya está cargada en ese edificio`);
-      else if (vistos.has(clave)) errores.push(`${t} ${numero} repetida en el archivo`);
-      vistos.add(clave);
+      if (!edificio) {
+        if (ctx.crearEdificios) {
+          crearEdificio = true;
+          avisos.push(`Se creará el edificio ${dir.direccionOriginal}`);
+        } else errores.push(`No existe un edificio en ${dir.direccionOriginal}`);
+      }
     }
 
-    const motivosNombres = splitLista(v.motivos);
-    const motivos = motivosNombres.map((n) => {
-      const id = ctx.motivos.get(norm(n));
-      if (id) return id;
-      if (ctx.permitirNuevos) {
-        nuevos.motivos.push(n);
+    const resolver = (texto, mapa, etiqueta, destino, vacioMsg) => {
+      const nombres = splitLista(texto);
+      if (!nombres.length) errores.push(vacioMsg);
+      return nombres.map((n) => {
+        const id = mapa.get(norm(n));
+        if (id) return id;
+        if (ctx.permitirNuevos) {
+          destino.push(n);
+          return null;
+        }
+        errores.push(`${etiqueta} inexistente: ${n}`);
         return null;
-      }
-      errores.push(`Motivo inexistente: ${n}`);
-      return null;
-    });
+      });
+    };
+    const inspectores = resolver(v.inspectores, ctx.inspectores, 'Inspector', nuevos.inspectores, 'Inspectores es obligatorio');
+    const motivos = resolver(v.motivos, ctx.motivos, 'Motivo', nuevos.motivos, 'Motivos es obligatorio');
+
+    const buscar = (texto, mapa, etiqueta) => {
+      const t = String(texto || '').trim();
+      if (!t) return null;
+      const id = mapa.get(norm(t));
+      if (!id) errores.push(`${etiqueta} inexistente: ${t}`);
+      return id || null;
+    };
+    const estado = buscar(v.estado, ctx.estados, 'Estado');
+    const oficina = buscar(v.oficina, ctx.oficinas, 'Oficina');
 
     return {
       fila,
-      data: { numero, tipo: t, fecha: fecha || null, edificio, motivos, motivosNombres, estado: String(v.estado).trim(), observaciones: obs, direccion: dir?.direccionOriginal },
+      data: {
+        numeroActa, fechaInfraccion: fecha || null, edificio, crearEdificio, dir,
+        infractor: String(v.infractor).trim(),
+        inspectoresNombres: splitLista(v.inspectores), motivosNombres: splitLista(v.motivos), inspectores, motivos,
+        estado, oficina, observaciones: obs, direccionOriginal: dir?.direccionOriginal,
+      },
       errores,
+      avisos,
       nuevos,
     };
   });

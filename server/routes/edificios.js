@@ -1,7 +1,7 @@
 const router = require('express').Router();
-const { Edificio, DocumentoEdificio, ActaVinculada, Inspeccion, ESTADOS_INSPECCION } = require('../models');
-const { protect, authorize, audit } = require('../middleware/auth');
-const { campanaDe, filtroBase, escapar, tiposActivos, semaforosDe } = require('../services/edificios');
+const { Edificio, DocumentoEdificio, Infraccion, Inspeccion, ESTADOS_INSPECCION } = require('../models');
+const { protect, authorize, permitir, audit } = require('../middleware/auth');
+const { campanaDe, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe } = require('../services/edificios');
 const { evaluarEdificio } = require('../services/semaforo');
 const { normalizarCalle, parseNumero, claveDireccion, titulo } = require('../services/direcciones');
 const { procesarPendientes } = require('../services/geocodificador');
@@ -13,7 +13,7 @@ const bad = (res, message) => res.status(400).json({ message });
 // Puntos livianos para el mapa
 router.get('/mapa', async (req, res) => {
   const campana = await campanaDe(req);
-  const filtro = filtroBase(campana, req.query);
+  const filtro = await aplicarInfracciones(filtroBase(campana, req.query), req.query);
   const todos = await Edificio.find(filtro).select('direccionOriginal lat lng geoEstado estadoInspeccion').lean();
   const sem = await semaforosDe(todos.map((e) => e._id));
   let lista = todos.map((e) => ({ ...e, semaforo: sem.get(String(e._id)) }));
@@ -41,7 +41,7 @@ router.get('/calles', async (req, res) => {
 // Listado paginado (incluye pendientes de ubicación)
 router.get('/', async (req, res) => {
   const campana = await campanaDe(req);
-  const filtro = filtroBase(campana, req.query);
+  const filtro = await aplicarInfracciones(filtroBase(campana, req.query), req.query);
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
   const [items, total] = await Promise.all([
@@ -69,7 +69,7 @@ router.get('/resumen', async (req, res) => {
 });
 
 // Alta manual
-router.post('/', authorize('Carga'), async (req, res) => {
+router.post('/', permitir('editarEdificios'), async (req, res) => {
   const campana = await campanaDe(req);
   if (!campana) return bad(res, 'No hay una campaña activa');
   const calleTxt = String(req.body.calle || '').trim();
@@ -104,10 +104,16 @@ router.post('/', authorize('Carga'), async (req, res) => {
 router.get('/:id', async (req, res) => {
   const e = await Edificio.findById(req.params.id).lean();
   if (!e) return res.status(404).json({ message: 'No encontrado' });
-  const [tipos, documentos, actas, inspecciones] = await Promise.all([
+  const [tipos, documentos, infracciones, inspecciones] = await Promise.all([
     tiposActivos(),
     DocumentoEdificio.find({ edificio: e._id }).lean(),
-    ActaVinculada.find({ edificio: e._id }).sort('-fecha').populate('motivos', 'nombre').lean(),
+    Infraccion.find({ edificio: e._id, eliminado: false })
+      .sort('-fechaInfraccion')
+      .populate('inspectoresActuantes', 'nombre')
+      .populate('motivosInfraccion', 'nombre')
+      .populate('estado', 'nombre')
+      .populate('oficinaActual', 'nombre')
+      .lean(),
     Inspeccion.find({ edificio: e._id }).sort('-fecha').populate('inspector', 'nombre').lean(),
   ]);
   const ev = evaluarEdificio(tipos, documentos);
@@ -116,13 +122,13 @@ router.get('/:id', async (req, res) => {
     semaforo: ev.semaforo,
     documentos: ev.detalle.map(({ tipo, doc, estado }) => ({ tipo, doc, estado })),
     infraccionesPotenciales: ev.infraccionesPotenciales,
-    actas,
+    infracciones,
     inspecciones,
   });
 });
 
 // Datos del edificio
-router.patch('/:id', authorize('Carga'), async (req, res) => {
+router.patch('/:id', permitir('editarEdificios'), async (req, res) => {
   const e = await Edificio.findById(req.params.id);
   if (!e) return res.status(404).json({ message: 'No encontrado' });
   ['titular', 'uso', 'observaciones'].forEach((k) => {
@@ -161,7 +167,7 @@ router.patch('/:id', authorize('Carga'), async (req, res) => {
 });
 
 // Corrección manual de ubicación (arrastrar marcador)
-router.patch('/:id/ubicacion', authorize('Carga'), async (req, res) => {
+router.patch('/:id/ubicacion', permitir('editarEdificios'), async (req, res) => {
   const lat = Number(req.body.lat);
   const lng = Number(req.body.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180)
@@ -173,11 +179,13 @@ router.patch('/:id/ubicacion', authorize('Carga'), async (req, res) => {
 });
 
 router.delete('/:id', authorize(), async (req, res) => {
+  if (await Infraccion.exists({ edificio: req.params.id, eliminado: false }))
+    return res.status(409).json({ message: 'El edificio tiene infracciones cargadas; eliminalas primero' });
   const e = await Edificio.findByIdAndDelete(req.params.id);
   if (!e) return res.status(404).json({ message: 'No encontrado' });
   await Promise.all([
     DocumentoEdificio.deleteMany({ edificio: e._id }),
-    ActaVinculada.deleteMany({ edificio: e._id }),
+    Infraccion.deleteMany({ edificio: e._id }),
     Inspeccion.deleteMany({ edificio: e._id }),
   ]);
   audit('eliminar', 'Edificio', e._id, req.user, e.direccionOriginal);
@@ -185,7 +193,7 @@ router.delete('/:id', authorize(), async (req, res) => {
 });
 
 // ---- Documentación ----
-router.put('/:id/documentos/:tipoId', authorize('Carga'), async (req, res) => {
+router.put('/:id/documentos/:tipoId', permitir('editarEdificios'), async (req, res) => {
   const { presente, fechaEmision, fechaVencimiento, nroReferencia, observaciones } = req.body;
   const fecha = (v) => (v ? new Date(v) : null);
   const emision = fecha(fechaEmision);
@@ -201,38 +209,8 @@ router.put('/:id/documentos/:tipoId', authorize('Carga'), async (req, res) => {
   res.json(doc);
 });
 
-// ---- Actas / expedientes vinculados ----
-router.post('/:id/actas', authorize('Carga'), async (req, res) => {
-  const { numero, tipo, fecha, motivos, estado, observaciones } = req.body;
-  if (!String(numero || '').trim()) return bad(res, 'El número es obligatorio');
-  try {
-    const a = await ActaVinculada.create({
-      edificio: req.params.id,
-      numero: String(numero).trim(),
-      tipo: tipo === 'expediente' ? 'expediente' : 'acta',
-      fecha: fecha || null,
-      motivos: Array.isArray(motivos) ? motivos : [],
-      estado,
-      observaciones,
-      origen: 'manual',
-    });
-    audit('crear', 'ActaVinculada', a._id, req.user, `${a.tipo} ${a.numero}`);
-    res.status(201).json(a);
-  } catch (err) {
-    if (err.code === 11000) return res.status(409).json({ message: 'Ese número ya está cargado en este edificio' });
-    throw err;
-  }
-});
-
-router.delete('/:id/actas/:actaId', authorize('Carga'), async (req, res) => {
-  const a = await ActaVinculada.findOneAndDelete({ _id: req.params.actaId, edificio: req.params.id });
-  if (!a) return res.status(404).json({ message: 'No encontrada' });
-  audit('eliminar', 'ActaVinculada', a._id, req.user, `${a.tipo} ${a.numero}`);
-  res.json({ ok: true });
-});
-
 // ---- Inspecciones (visitas) ----
-router.post('/:id/inspecciones', authorize('Carga'), async (req, res) => {
+router.post('/:id/inspecciones', permitir('editarEdificios'), async (req, res) => {
   const { fecha, inspector, resultado, observaciones } = req.body;
   if (!fecha || Number.isNaN(new Date(fecha).getTime())) return bad(res, 'Fecha inválida');
   if (!ESTADOS_INSPECCION.slice(1).includes(resultado)) return bad(res, 'Resultado inválido');
@@ -245,7 +223,7 @@ router.post('/:id/inspecciones', authorize('Carga'), async (req, res) => {
   res.status(201).json(i);
 });
 
-router.delete('/:id/inspecciones/:inspId', authorize('Carga'), async (req, res) => {
+router.delete('/:id/inspecciones/:inspId', permitir('editarEdificios'), async (req, res) => {
   const i = await Inspeccion.findOneAndDelete({ _id: req.params.inspId, edificio: req.params.id });
   if (!i) return res.status(404).json({ message: 'No encontrada' });
   const ultima = await Inspeccion.findOne({ edificio: req.params.id }).sort('-fecha');

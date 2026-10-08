@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-export type Rol = 'Administrador' | 'Carga' | 'Consulta';
+export type Rol = 'Administrador' | 'Tecnico' | 'Juridico' | 'Direccion' | 'MesaDeEntradas' | 'Consulta';
 export interface Usuario {
   id: string;
   nombres: string;
@@ -80,14 +80,48 @@ export interface FichaDocumento {
   doc: DocumentoEdificio | null;
   estado: EstadoDoc;
 }
-export interface ActaVinculada {
+export interface Estado extends Catalogo {
+  descripcion?: string;
+  esInicial: boolean;
+  requiereComentario: boolean;
+  esFinal: boolean;
+  orden: number;
+}
+export interface Oficina extends Catalogo {
+  descripcion?: string;
+  esInicial: boolean;
+  orden: number;
+}
+export interface Asignable {
+  id: string;
+  nombres: string;
+  apellidos: string;
+  role: Rol;
+}
+export interface Movimiento {
+  fecha: string;
+  oficinaOrigen?: { _id: string; nombre: string } | null;
+  oficinaDestino: { _id: string; nombre: string };
+  estado?: { _id: string; nombre: string } | null;
+  por: { nombres: string; apellidos: string; username: string };
+  comentarios: string;
+}
+export interface Infraccion {
   _id: string;
-  numero: string;
-  tipo: 'acta' | 'expediente';
-  fecha?: string | null;
-  motivos: { _id: string; nombre: string }[];
-  estado: string;
-  observaciones: string;
+  numeroActa: string;
+  edificio: { _id: string; direccionOriginal: string; lat: number | null; lng: number | null };
+  infractor: string;
+  inspectoresActuantes: { _id: string; nombre: string; legajo?: string }[];
+  motivosInfraccion: { _id: string; nombre: string }[];
+  fechaInfraccion: string;
+  estado: { _id: string; nombre: string; requiereComentario: boolean; esFinal: boolean };
+  oficinaActual: { _id: string; nombre: string };
+  asignadoA?: { _id: string; nombres: string; apellidos: string } | null;
+  observaciones: boolean;
+  detalleObservaciones: string;
+  historialMovimientos?: Movimiento[];
+  expediente?: { numero: string; fecha?: string };
+  edificioCreado?: boolean;
 }
 export interface InspeccionVisita {
   _id: string;
@@ -101,7 +135,7 @@ export interface Ficha {
   semaforo: Semaforo;
   documentos: FichaDocumento[];
   infraccionesPotenciales: { documento: string; estado: EstadoDoc; motivo: { _id: string; nombre: string } }[];
-  actas: ActaVinculada[];
+  infracciones: Infraccion[];
   inspecciones: InspeccionVisita[];
 }
 
@@ -145,4 +179,3 @@ export const errMsg = (e: unknown): string =>
 export const fmtFecha = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString('es-AR', { timeZone: 'UTC' }) : '—';
 export const isoDia = (iso?: string | null) => (iso ? iso.slice(0, 10) : '');
-export const puedeCargar = (rol?: Rol) => rol === 'Administrador' || rol === 'Carga';
