@@ -86,6 +86,15 @@ const edificioSchema = new Schema(
     uso: { type: String, default: '', trim: true },
     observaciones: { type: String, default: '', trim: true },
     estadoInspeccion: { type: String, enum: ESTADOS_INSPECCION, default: 'pendiente', index: true },
+    // Datos de Catastro (cuando el edificio viene de un cruce)
+    padron: { type: String, default: '', trim: true },
+    estadoObra: { type: String, default: '', trim: true },
+    calleOrigen: { type: String, default: '', trim: true },
+    alturaOriginal: { type: String, default: '', trim: true },
+    esquina: { type: String, default: '', trim: true },
+    conclusionCruce: { type: String, default: '', trim: true },
+    mismaCalleOtraAltura: { type: Boolean, default: false },
+    enListadoSinCert: { type: Boolean, default: false },
     origen: { type: String, enum: ['excel', 'manual'], default: 'manual' },
     lotImportacion: { type: String, index: true },
     creadoPor: { type: ObjectId, ref: 'User' },
@@ -103,6 +112,7 @@ const documentoSchema = new Schema(
     fechaVencimiento: Date,
     nroReferencia: { type: String, default: '', trim: true },
     observaciones: { type: String, default: '', trim: true },
+    lotImportacion: { type: String, index: true },
   },
   { timestamps: true }
 );

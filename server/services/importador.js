@@ -1,5 +1,6 @@
 const XLSX = require('xlsx');
 const { norm, normalizarCalle, parseNumero, separarDireccion, claveDireccion, titulo } = require('./direcciones');
+const { calleComun, primeraAltura, esSi, filasDelCruce } = require('./catastro');
 
 // Definición única de columnas: alimenta la plantilla y el parser.
 // alias: otros encabezados aceptados (se comparan normalizados, sin tildes).
@@ -51,6 +52,16 @@ function leerHoja(buffer) {
   return XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
 }
 
+/** Cruce Catastro / Defensa Civil: se lee tal cual, ubicando los encabezados dentro de la hoja. */
+function leerCruce(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('El archivo no tiene hojas');
+  const filas = filasDelCruce(XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true }));
+  if (!filas) throw new Error('No parece un cruce de Catastro: no se encontró la fila con PADRÓN y CALLE');
+  return filas;
+}
+
 function generarPlantilla(tipo) {
   const cols = COLUMNAS[tipo];
   const ws = XLSX.utils.aoa_to_sheet([cols.map((c) => c.header), cols.map((c) => c.ejemplo)]);
@@ -100,6 +111,69 @@ function resolverDireccion(calleRaw, numeroRaw, direccionRaw, errores) {
   };
 }
 
+const limpiar = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+/** Valida las filas del cruce. Une las repetidas (misma calle y altura) y avisa de calles sin alias. */
+function validarCruce(filas, ctx) {
+  const vistos = new Map(); // direccionNorm -> resultado de la primera fila
+  const resultados = [];
+  filas.forEach((raw) => {
+    const errores = [];
+    const avisos = [];
+    const nuevos = { motivos: [] };
+    const fila = raw._fila;
+    const { calle, esquina, conAlias } = calleComun(raw.calleOrigen);
+    const alt = primeraAltura(raw.altura);
+    if (!alt.numero) errores.push(`Altura sin número: "${alt.texto}"`);
+    if (!conAlias) avisos.push(`Calle sin nombre común asignado, se carga tal cual: ${limpiar(raw.calleOrigen)}`);
+
+    const calleNorm = normalizarCalle(calle);
+    const direccionNorm = claveDireccion(calleNorm, alt.numero);
+    const direccionOriginal = alt.numero ? `${calle} ${alt.numero}` : calle;
+    const tiene = esSi(raw.tieneCert);
+    const sinFinalEnCatastro = !limpiar(raw.estadoObra) ? '' : limpiar(raw.estadoObra);
+
+    const data = {
+      calle, calleNorm, numero: alt.numero, direccionNorm, direccionOriginal,
+      titular: limpiar(raw.propietario),
+      padron: limpiar(raw.padron),
+      estadoObra: sinFinalEnCatastro,
+      calleOrigen: limpiar(raw.calleOrigen),
+      alturaOriginal: alt.texto,
+      esquina,
+      conclusionCruce: limpiar(raw.conclusion),
+      mismaCalleOtraAltura: esSi(raw.mismaCalle),
+      enListadoSinCert: esSi(raw.enListadoSinCert),
+      observaciones: '',
+      cert: {
+        tiene,
+        numero: limpiar(raw.certNumero),
+        expediente: limpiar(raw.certExpediente),
+        anio: limpiar(raw.certAnio),
+      },
+    };
+
+    if (alt.numero) {
+      if (ctx.existentes.has(direccionNorm)) errores.push(`${direccionOriginal} ya existe en la campaña`);
+      else if (vistos.has(direccionNorm)) {
+        const base = vistos.get(direccionNorm);
+        if (!errores.length) {
+          // misma dirección: se suma al edificio ya leído (otro padrón o propietario)
+          if (data.padron && !base.data.padron.split(' / ').includes(data.padron)) base.data.padron += ` / ${data.padron}`;
+          if (data.titular && !base.data.titular.split(' // ').includes(data.titular)) base.data.titular += ` // ${data.titular}`;
+          base.avisos.push(`Se unió la fila ${fila} (mismo edificio, padrón ${data.padron || '—'})`);
+          resultados.push({ fila, data: null, errores: [], avisos: [`Unida con la fila ${base.fila}: es la misma dirección`], nuevos, unida: true });
+          return;
+        }
+      }
+    }
+    const r = { fila, data, errores, avisos, nuevos };
+    if (alt.numero && !errores.length) vistos.set(direccionNorm, r);
+    resultados.push(r);
+  });
+  return resultados;
+}
+
 /**
  * Valida filas leídas. Función pura.
  * edificios: ctx { existentes:Set(direccionNorm) }
@@ -108,6 +182,7 @@ function resolverDireccion(calleRaw, numeroRaw, direccionRaw, errores) {
  * Devuelve [{ fila, data, errores[], nuevos:{motivos[]} }]
  */
 function validarFilas(tipo, filas, ctx) {
+  if (tipo === 'cruce') return validarCruce(filas, ctx);
   const cols = COLUMNAS[tipo];
   const vistos = new Set();
   return filas.map((raw, i) => {
@@ -169,4 +244,4 @@ function validarFilas(tipo, filas, ctx) {
   });
 }
 
-module.exports = { COLUMNAS, parseFecha, splitLista, leerHoja, generarPlantilla, validarFilas };
+module.exports = { COLUMNAS, parseFecha, splitLista, leerHoja, leerCruce, generarPlantilla, validarFilas };

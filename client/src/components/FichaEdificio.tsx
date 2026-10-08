@@ -133,6 +133,20 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
         {ficha && e && tab === 0 && (
           <Stack spacing={2}>
             {e.geoDisplayName && <Typography variant="caption" color="text.secondary">OSM: {e.geoDisplayName}</Typography>}
+            {(e.padron || e.estadoObra) && (
+              <Paper sx={{ p: 1.5 }}>
+                <Typography variant="subtitle2" gutterBottom>Catastro</Typography>
+                <Stack spacing={0.4}>
+                  {e.padron && <Typography variant="body2"><strong>Padrón:</strong> {e.padron}</Typography>}
+                  {e.estadoObra && <Typography variant="body2"><strong>Estado de obra:</strong> {e.estadoObra}</Typography>}
+                  {e.calleOrigen && <Typography variant="body2"><strong>Figura como:</strong> {e.calleOrigen} {e.alturaOriginal}</Typography>}
+                  {e.esquina && <Typography variant="body2"><strong>Esquina:</strong> {e.esquina}</Typography>}
+                  {e.conclusionCruce && <Typography variant="body2" color="text.secondary">{e.conclusionCruce}</Typography>}
+                </Stack>
+                {e.mismaCalleOtraAltura && <Chip size="small" color="warning" label="Hay certificado en la misma calle con otra altura" sx={{ mt: 1 }} />}
+                {e.enListadoSinCert && <Chip size="small" color="info" label="Está en el listado de Defensa Civil sin certificado" sx={{ mt: 1, ml: 0.5 }} />}
+              </Paper>
+            )}
             <TextField size="small" label="Titular" value={datos.titular} disabled={!puedeEditar} onChange={(ev) => setDatos({ ...datos, titular: ev.target.value })} />
             <TextField size="small" label="Uso" value={datos.uso} disabled={!puedeEditar} onChange={(ev) => setDatos({ ...datos, uso: ev.target.value })} />
             <TextField size="small" label="Observaciones" multiline minRows={2} value={datos.observaciones} disabled={!puedeEditar} onChange={(ev) => setDatos({ ...datos, observaciones: ev.target.value })} />

@@ -6,9 +6,9 @@ import {
 import { api, errMsg } from '../api';
 import { useAuth } from '../auth';
 
-type Tipo = 'edificios' | 'actas';
-interface FilaPrev { fila: number; direccion: string; errores: string[]; nuevos: { motivos: string[] } }
-interface Prev { total: number; validas: number; conErrores: number; filas: FilaPrev[] }
+type Tipo = 'edificios' | 'actas' | 'cruce';
+interface FilaPrev { fila: number; direccion: string; errores: string[]; avisos: string[]; unida: boolean; nuevos: { motivos: string[] } }
+interface Prev { total: number; validas: number; conErrores: number; unidas?: number; conAvisos?: number; certificados?: number; filas: FilaPrev[] }
 interface Progreso { corriendo: boolean; pendientes: number; porEstado: Record<string, number>; ultimoError: string }
 
 export default function ImportarPage() {
@@ -64,7 +64,8 @@ export default function ImportarPage() {
     try {
       const r = await api.post(`/importar/${tipo}/confirmar`, form());
       setLote({ id: r.data.lote, tipo, importadas: r.data.importadas });
-      setMsg(`Se importaron ${r.data.importadas} filas${r.data.omitidas ? ` (${r.data.omitidas} omitidas por errores)` : ''}.`);
+      const extra = [r.data.unidas ? `${r.data.unidas} repetidas unidas` : '', r.data.conCertificado !== undefined ? `${r.data.conCertificado} con certificado final` : '', r.data.omitidas ? `${r.data.omitidas} omitidas por errores` : ''].filter(Boolean).join(', ');
+      setMsg(`Se importaron ${r.data.importadas} ${tipo === 'actas' ? 'filas' : 'edificios'}${extra ? ` (${extra})` : ''}.`);
       setPrev(null); setArchivo(null);
       if (input.current) input.current.value = '';
     } catch (e) { setError(errMsg(e)); }
@@ -90,18 +91,19 @@ export default function ImportarPage() {
         <ToggleButtonGroup exclusive value={tipo} onChange={(_, v) => { if (v) { setTipo(v); setPrev(null); setMsg(''); } }} size="small">
           <ToggleButton value="edificios">Edificios (direcciones)</ToggleButton>
           <ToggleButton value="actas">Actas y expedientes</ToggleButton>
+          <ToggleButton value="cruce">Cruce Catastro / Defensa Civil</ToggleButton>
         </ToggleButtonGroup>
         <Alert severity="info">
-          {tipo === 'edificios'
-            ? 'Cargá un .xlsx con las columnas Calle y Número (o una sola columna "Dirección completa"). Después de importar, las direcciones se ubican solas en el mapa.'
-            : 'Vinculá actas o expedientes ya existentes a edificios cargados. Se asocian por Calle + Número, así que primero importá los edificios.'}
+          {tipo === 'edificios' && 'Cargá un .xlsx con las columnas Calle y Número (o una sola columna "Dirección completa"). Después de importar, las direcciones se ubican solas en el mapa.'}
+          {tipo === 'actas' && 'Vinculá actas o expedientes ya existentes a edificios cargados. Se asocian por Calle + Número, así que primero importá los edificios.'}
+          {tipo === 'cruce' && 'Subí el Excel del cruce tal cual está: se ignoran el resumen y las notas, se traducen los nombres de calle de Catastro, se toma la primera altura y se registra el certificado final de Defensa Civil de cada edificio.'}
         </Alert>
         {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
         {msg && <Alert severity="success" action={lote && esAdmin ? <Button color="inherit" size="small" onClick={revertir}>Revertir</Button> : undefined}>{msg}</Alert>}
 
         <Paper sx={{ p: 2 }}>
           <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-            <Button onClick={descargarPlantilla}>Descargar plantilla</Button>
+            {tipo !== 'cruce' && <Button onClick={descargarPlantilla}>Descargar plantilla</Button>}
             <Button component="label" variant="outlined">
               {archivo ? archivo.name : 'Elegir archivo .xlsx'}
               <input ref={input} hidden type="file" accept=".xlsx" onChange={(e) => { setArchivo(e.target.files?.[0] ?? null); setPrev(null); }} />
@@ -119,19 +121,22 @@ export default function ImportarPage() {
               <Chip label={`${prev.total} filas`} />
               <Chip color="success" label={`${prev.validas} válidas`} />
               <Chip color={prev.conErrores ? 'error' : 'default'} label={`${prev.conErrores} con errores`} />
+              {!!prev.unidas && <Chip color="info" label={`${prev.unidas} repetidas, se unen`} />}
+              {!!prev.conAvisos && <Chip color="warning" label={`${prev.conAvisos} con avisos`} />}
+              {tipo === 'cruce' && <Chip variant="outlined" label={`${prev.certificados ?? 0} con certificado final`} />}
               <Box sx={{ flex: 1 }} />
-              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>Importar {prev.validas} filas válidas</Button>
+              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'actas' ? 'filas' : 'edificios'}</Button>
             </Stack>
             <Table size="small">
               <TableHead><TableRow><TableCell width={70}>Fila</TableCell><TableCell>Dirección</TableCell><TableCell>Resultado</TableCell></TableRow></TableHead>
               <TableBody>
-                {prev.filas.filter((f) => f.errores.length).slice(0, 200).map((f) => (
+                {prev.filas.filter((f) => f.errores.length || f.avisos.length).slice(0, 200).map((f) => (
                   <TableRow key={f.fila}>
                     <TableCell>{f.fila}</TableCell><TableCell>{f.direccion || '—'}</TableCell>
-                    <TableCell sx={{ color: 'error.main' }}>{f.errores.join(' · ')}</TableCell>
+                    <TableCell sx={{ color: f.errores.length ? 'error.main' : 'warning.main' }}>{[...f.errores, ...f.avisos].join(' · ')}</TableCell>
                   </TableRow>
                 ))}
-                {!prev.conErrores && <TableRow><TableCell colSpan={3} align="center" sx={{ color: 'text.secondary' }}>Todas las filas son válidas.</TableCell></TableRow>}
+                {!prev.conErrores && !prev.conAvisos && !prev.unidas && <TableRow><TableCell colSpan={3} align="center" sx={{ color: 'text.secondary' }}>Todas las filas son válidas.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </Paper>

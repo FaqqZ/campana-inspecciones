@@ -50,6 +50,14 @@ export interface Edificio {
   observaciones: string;
   estadoInspeccion: EstadoInspeccion;
   semaforo?: Semaforo;
+  padron?: string;
+  estadoObra?: string;
+  calleOrigen?: string;
+  alturaOriginal?: string;
+  esquina?: string;
+  conclusionCruce?: string;
+  mismaCalleOtraAltura?: boolean;
+  enListadoSinCert?: boolean;
 }
 export interface PuntoMapa {
   id: string;

@@ -1,9 +1,10 @@
 const router = require('express').Router();
 const crypto = require('crypto');
 const multer = require('multer');
-const { Edificio, ActaVinculada, DocumentoEdificio, Inspeccion, MotivoInfraccion, norm } = require('../models');
+const { Edificio, ActaVinculada, DocumentoEdificio, Inspeccion, MotivoInfraccion, TipoDocumento, norm } = require('../models');
 const { protect, authorize, audit } = require('../middleware/auth');
-const { generarPlantilla, leerHoja, validarFilas } = require('../services/importador');
+const { generarPlantilla, leerHoja, leerCruce, validarFilas } = require('../services/importador');
+const { TIPO_CERT, MOTIVO_CERT } = require('../services/catastro');
 const { campanaDe } = require('../services/edificios');
 const { procesarPendientes } = require('../services/geocodificador');
 
@@ -18,9 +19,10 @@ const upload = multer({
 router.use(protect);
 
 const tipoValido = (req, res, next) =>
-  ['edificios', 'actas'].includes(req.params.tipo) ? next() : res.status(404).json({ message: 'Tipo inexistente' });
+  ['edificios', 'actas', 'cruce'].includes(req.params.tipo) ? next() : res.status(404).json({ message: 'Tipo inexistente' });
 
 router.get('/plantilla/:tipo', tipoValido, (req, res) => {
+  if (req.params.tipo === 'cruce') return res.status(404).json({ message: 'El cruce se carga con el archivo tal cual, sin plantilla' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="plantilla-${req.params.tipo}.xlsx"`);
   res.send(generarPlantilla(req.params.tipo));
@@ -37,16 +39,16 @@ async function preparar(req) {
   if (!campana) throw fallo('No hay una campaña activa');
   let filas;
   try {
-    filas = leerHoja(req.file.buffer);
-  } catch {
-    throw fallo('No se pudo leer el archivo Excel');
+    filas = req.params.tipo === 'cruce' ? leerCruce(req.file.buffer) : leerHoja(req.file.buffer);
+  } catch (e) {
+    throw fallo(/cruce/i.test(e.message) ? e.message : 'No se pudo leer el archivo Excel');
   }
   if (!filas.length) throw fallo('El archivo no tiene filas de datos');
   if (filas.length > MAX_FILAS) throw fallo(`El archivo supera el máximo de ${MAX_FILAS} filas`);
 
   const { tipo } = req.params;
   let ctx;
-  if (tipo === 'edificios') {
+  if (tipo === 'edificios' || tipo === 'cruce') {
     const ex = await Edificio.find({ campana }, 'direccionNorm').lean();
     ctx = { existentes: new Set(ex.map((e) => e.direccionNorm)) };
   } else {
@@ -70,6 +72,8 @@ const resumir = (r) => ({
   direccion: r.data?.direccionOriginal || r.data?.direccion || '',
   numero: r.data?.numero,
   errores: r.errores,
+  avisos: r.avisos || [],
+  unida: Boolean(r.unida),
   nuevos: r.nuevos,
 });
 
@@ -77,7 +81,16 @@ router.post('/:tipo/previsualizar', tipoValido, authorize('Carga'), subir, async
   try {
     const { resultado } = await preparar(req);
     const validas = resultado.filter((r) => !r.errores.length).length;
-    res.json({ total: resultado.length, validas, conErrores: resultado.length - validas, filas: resultado.map(resumir) });
+    const unidas = resultado.filter((r) => r.unida).length;
+    res.json({
+      total: resultado.length,
+      validas,
+      conErrores: resultado.length - validas,
+      unidas,
+      conAvisos: resultado.filter((r) => r.avisos?.length && !r.unida).length,
+      certificados: resultado.filter((r) => r.data?.cert?.tiene).length,
+      filas: resultado.map(resumir),
+    });
   } catch (e) {
     res.status(e.status || 500).json({ message: e.message });
   }
@@ -96,6 +109,49 @@ router.post('/:tipo/confirmar', tipoValido, authorize('Carga'), subir, async (re
 
   const lote = crypto.randomUUID();
   const { tipo } = req.params;
+
+  if (tipo === 'cruce') {
+    // Catálogo del certificado final: se crea una sola vez y queda editable en Catálogos.
+    const motivo = await MotivoInfraccion.findOneAndUpdate(
+      { nombreNorm: norm(MOTIVO_CERT) },
+      { $setOnInsert: { nombre: MOTIVO_CERT, nombreNorm: norm(MOTIVO_CERT), descripcion: 'Edificio sin certificado final de inspección de Defensa Civil' } },
+      { upsert: true, new: true }
+    );
+    const tipoDoc = await TipoDocumento.findOneAndUpdate(
+      { nombreNorm: norm(TIPO_CERT) },
+      { $setOnInsert: { nombre: TIPO_CERT, nombreNorm: norm(TIPO_CERT), requerido: true, tieneVencimiento: false, motivoAsociado: motivo._id, orden: 1 } },
+      { upsert: true, new: true }
+    );
+    const reales = validas.filter((r) => !r.unida);
+    const docs = reales.map(({ data }) => {
+      const { cert, ...resto } = data;
+      return { ...resto, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id };
+    });
+    const creados = await Edificio.insertMany(docs, { ordered: false });
+    const documentos = creados.map((e, i) => {
+      const { cert } = reales[i].data;
+      const partes = [cert.expediente && `Expte. ${cert.expediente}`, cert.anio && `año ${cert.anio}`, cert.tiene && 'Cargado desde el cruce Catastro / Defensa Civil'].filter(Boolean);
+      return {
+        edificio: e._id,
+        tipo: tipoDoc._id,
+        presente: cert.tiene,
+        nroReferencia: cert.numero,
+        observaciones: partes.join(' · '),
+        lotImportacion: lote,
+      };
+    });
+    await DocumentoEdificio.insertMany(documentos, { ordered: false });
+    audit('importar', 'Edificio', lote, req.user, `${creados.length} edificios (cruce Catastro / Defensa Civil)`);
+    procesarPendientes({ campana });
+    return res.status(201).json({
+      lote,
+      importadas: creados.length,
+      unidas: validas.length - reales.length,
+      omitidas: resultado.length - validas.length,
+      conCertificado: documentos.filter((d) => d.presente).length,
+      geocodificando: true,
+    });
+  }
 
   if (tipo === 'edificios') {
     const docs = validas.map((r) => ({ ...r.data, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id }));
@@ -142,12 +198,13 @@ router.delete('/:tipo/lote/:lote', tipoValido, authorize(), async (req, res) => 
   const ids = (await Edificio.find({ lotImportacion: lote }, '_id').lean()).map((e) => e._id);
   if (!ids.length) return res.status(404).json({ message: 'Lote inexistente' });
   const [docs, actas, insp] = await Promise.all([
-    DocumentoEdificio.exists({ edificio: { $in: ids } }),
+    DocumentoEdificio.exists({ edificio: { $in: ids }, lotImportacion: { $ne: lote } }),
     ActaVinculada.exists({ edificio: { $in: ids } }),
     Inspeccion.exists({ edificio: { $in: ids } }),
   ]);
   if (docs || actas || insp)
     return res.status(409).json({ message: 'Hay edificios del lote con documentación, actas o inspecciones cargadas' });
+  await DocumentoEdificio.deleteMany({ edificio: { $in: ids }, lotImportacion: lote });
   const r = await Edificio.deleteMany({ lotImportacion: lote });
   audit('revertir-lote', 'Edificio', lote, req.user, `${r.deletedCount} eliminados`);
   res.json({ eliminadas: r.deletedCount });
