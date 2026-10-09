@@ -10,6 +10,7 @@ import ImportarPage from './pages/ImportarPage';
 import CatalogosPage from './pages/CatalogosPage';
 import InfraccionesPage from './pages/InfraccionesPage';
 import UsuariosPage from './pages/UsuariosPage';
+import KpisPage from './pages/KpisPage';
 import { Accion, can } from './utils/permisos';
 
 function Private({ children, accion }: { children: ReactNode; accion?: Accion }) {
@@ -49,6 +50,7 @@ function Layout() {
             <NavLink to="/" end style={link}>Mapa</NavLink>
             <NavLink to="/edificios" style={link}>Edificios</NavLink>
             <NavLink to="/infracciones" style={link}>Infracciones</NavLink>
+            <NavLink to="/kpis" style={link}>Indicadores</NavLink>
             {can(rol, 'importar') && <NavLink to="/importar" style={link}>Importar</NavLink>}
             <NavLink to="/catalogos" style={link}>Catálogos</NavLink>
             {can(rol, 'usuarios') && <NavLink to="/usuarios" style={link}>Usuarios</NavLink>}
@@ -73,6 +75,7 @@ export default function App() {
         <Route index element={<MapaPage />} />
         <Route path="edificios" element={<EdificiosPage />} />
         <Route path="infracciones" element={<InfraccionesPage />} />
+        <Route path="kpis" element={<KpisPage />} />
         <Route path="importar" element={<Private accion="importar"><ImportarPage /></Private>} />
         <Route path="catalogos" element={<CatalogosPage />} />
         <Route path="usuarios" element={<Private accion="usuarios"><UsuariosPage /></Private>} />

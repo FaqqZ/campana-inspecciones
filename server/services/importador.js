@@ -1,6 +1,7 @@
 const XLSX = require('xlsx');
 const { norm, normalizarCalle, parseNumero, separarDireccion, claveDireccion, titulo } = require('./direcciones');
 const { calleComun, primeraAltura, esSi, filasDelCruce } = require('./catastro');
+const actas = require('./actas');
 
 // Definición única de columnas: alimenta la plantilla y el parser.
 // alias: otros encabezados aceptados (se comparan normalizados, sin tildes).
@@ -177,6 +178,111 @@ function validarCruce(filas, ctx) {
 }
 
 /**
+ * Listado de actas de Defensa Civil. Cada fila es un acta; una misma acta repetida en el archivo
+ * (mismo edificio) se une en una sola con todos sus motivos.
+ * ctx: { edificios:Map(direccionNorm->id), motivos:Map, calles:Map(calleNorm->cantidad), existentes:Set(numeroActa), crearEdificios }
+ */
+function validarActas(filas, ctx) {
+  // pasada 1: domicilios y frecuencia de calles (para corregir errores de tipeo como "San Matin")
+  const conteo = new Map(ctx.calles || []);
+  const doms = filas.map((raw) => {
+    const dom = actas.parseDomicilio(raw.domicilio);
+    if (!dom.error) {
+      dom.calleNorm = normalizarCalle(actas.CALLES[normalizarCalle(dom.calle)] || dom.calle);
+      conteo.set(dom.calleNorm, (conteo.get(dom.calleNorm) || 0) + 1);
+    }
+    return dom;
+  });
+  const largos = new Map();
+  filas.forEach((raw) => { const n = limpiar(raw.acta).length; if (n) largos.set(n, (largos.get(n) || 0) + 1); });
+  const largoComun = [...largos.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  const vistos = new Map(); // numeroActa -> resultado de la primera fila
+  const resultados = [];
+  filas.forEach((raw, i) => {
+    const errores = [];
+    const avisos = [];
+    const nuevos = { motivos: [], inspectores: [] };
+    const fila = raw._fila;
+    const dom = doms[i];
+
+    const numeroActa = limpiar(raw.acta);
+    if (numeroActa.length < 3 || numeroActa.length > 50) errores.push('N° de acta debe tener entre 3 y 50 caracteres');
+    else if (ctx.existentes.has(numeroActa)) errores.push(`El acta ${numeroActa} ya existe`);
+    else if (largoComun && numeroActa.length !== largoComun) avisos.push(`El acta ${numeroActa} tiene ${numeroActa.length} dígitos (las demás ${largoComun}): revisar si falta uno`);
+
+    const fecha = actas.fechaDeActa(raw.fecha);
+    if (fecha === null) errores.push('Fecha es obligatoria');
+    else if (fecha === undefined) errores.push('Fecha inválida');
+
+    let dir = null;
+    let edificio = null;
+    let crearEdificio = false;
+    if (dom.error) errores.push(dom.error);
+    else {
+      let calle = dom.calle;
+      const corr = actas.corregirCalle(dom.calleNorm, conteo);
+      if (corr) {
+        avisos.push(`Calle "${limpiar(dom.calle)}" corregida a "${corr}"`);
+        calle = corr;
+      }
+      dir = actas.direccionDeActa(dom, calle);
+      if (!dom.numero) avisos.push(`Sin número, esquina ${dir.esquina}: se carga como esquina`);
+      edificio = ctx.edificios.get(dir.direccionNorm) || null;
+      if (!edificio) {
+        if (ctx.crearEdificios) {
+          crearEdificio = true;
+          dir.titular = limpiar(raw.razon);
+          avisos.push(`Se creará el edificio ${dir.direccionOriginal}`);
+        } else errores.push(`No existe un edificio en ${dir.direccionOriginal}`);
+      }
+    }
+
+    const descripcion = limpiar(raw.motivo);
+    if (!descripcion) errores.push('Motivo es obligatorio');
+
+    const normativa = limpiar(raw.normativa);
+    const infractor = limpiar(raw.razon);
+    const motivosNombres = descripcion ? actas.clasificarMotivos(descripcion, normativa) : [];
+    motivosNombres.forEach((n) => { if (!ctx.motivos.has(norm(n))) nuevos.motivos.push(n); });
+    if (motivosNombres.includes(actas.MOTIVOS.otros)) avisos.push('Motivo sin clasificar, queda como "Otros motivos"');
+
+    if (numeroActa && !errores.length) {
+      const base = vistos.get(numeroActa);
+      if (base) {
+        if (base.data.dir && dir && base.data.dir.direccionNorm !== dir.direccionNorm) {
+          errores.push(`El acta ${numeroActa} ya figura en otro domicilio (fila ${base.fila}: ${base.data.direccionOriginal})`);
+        } else {
+          motivosNombres.forEach((n) => { if (!base.data.motivosNombres.includes(n)) base.data.motivosNombres.push(n); });
+          if (descripcion && norm(descripcion) !== norm(base.data.descripcion)) {
+            base.data.descripcion += ` | ${descripcion}`;
+            base.avisos.push(`El acta ${numeroActa} se repite con otra descripción (fila ${fila}): revisar`);
+          }
+          if (normativa && !base.data.normativa.split(' | ').map(norm).includes(norm(normativa))) base.data.normativa += ` | ${normativa}`;
+          if (infractor && norm(infractor) !== norm(base.data.infractor)) base.avisos.push(`El acta ${numeroActa} figura también a nombre de "${infractor}" (fila ${fila})`);
+          resultados.push({ fila, data: null, errores: [], avisos: [`Unida con la fila ${base.fila}: misma acta ${numeroActa}`], nuevos: { motivos: [], inspectores: [] }, unida: true });
+          return;
+        }
+      }
+    }
+
+    const r = {
+      fila,
+      data: {
+        numeroActa, fechaInfraccion: fecha || null, edificio, crearEdificio, dir,
+        infractor, descripcion, normativa,
+        inspectoresNombres: [], motivosNombres, inspectores: [], motivos: [],
+        estado: null, oficina: null, observaciones: '', direccionOriginal: dir?.direccionOriginal || limpiar(raw.domicilio),
+      },
+      errores, avisos, nuevos,
+    };
+    if (numeroActa && !errores.length) vistos.set(numeroActa, r);
+    resultados.push(r);
+  });
+  return resultados;
+}
+
+/**
  * Valida filas leídas. Función pura.
  * edificios: ctx { existentes:Set(direccionNorm) }
  * infracciones: ctx { edificios:Map(direccionNorm->id), inspectores/motivos/estados/oficinas:Map(norm->id),
@@ -185,6 +291,7 @@ function validarCruce(filas, ctx) {
  */
 function validarFilas(tipo, filas, ctx) {
   if (tipo === 'cruce') return validarCruce(filas, ctx);
+  if (tipo === 'actas') return validarActas(filas, ctx);
   const cols = COLUMNAS[tipo];
   const vistos = new Set();
   return filas.map((raw, i) => {
@@ -271,4 +378,4 @@ function validarFilas(tipo, filas, ctx) {
   });
 }
 
-module.exports = { COLUMNAS, parseFecha, splitLista, leerHoja, leerCruce, generarPlantilla, validarFilas };
+module.exports = { COLUMNAS, parseFecha, splitLista, leerHoja, leerCruce, leerActas: actas.leerActas, generarPlantilla, validarFilas };

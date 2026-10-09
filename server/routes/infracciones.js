@@ -5,6 +5,7 @@ const { campanaDe, buscarOCrearEdificio, escapar } = require('../services/edific
 const { normalizarCalle } = require('../services/direcciones');
 const { validarDatos, validarPase, puedePasar, esEditable, esCerrada, numeroExpedienteAuto } = require('../services/infracciones');
 const { procesarPendientes } = require('../services/geocodificador');
+const { calcularKpis } = require('../services/kpis');
 
 router.use(protect);
 
@@ -69,6 +70,26 @@ router.get('/', async (req, res) => {
     Infraccion.countDocuments(f),
   ]);
   res.json({ total, page, items });
+});
+
+// ---- Indicadores (acepta fechaDesde / fechaHasta) ----
+router.get('/kpis', async (req, res) => {
+  const q = req.query;
+  const campana = await campanaDe(req);
+  const f = { eliminado: false };
+  if (q.fechaDesde || q.fechaHasta) {
+    f.fechaInfraccion = {};
+    if (q.fechaDesde) f.fechaInfraccion.$gte = new Date(`${q.fechaDesde}T00:00:00.000Z`);
+    if (q.fechaHasta) f.fechaInfraccion.$lte = new Date(`${q.fechaHasta}T23:59:59.999Z`);
+  }
+  const [infracciones, totalEdificios] = await Promise.all([
+    Infraccion.find(f, 'fechaInfraccion estado oficinaActual motivosInfraccion edificio expediente asignadoA')
+      .populate('estado oficinaActual motivosInfraccion', 'nombre')
+      .populate('edificio', 'direccionOriginal calle')
+      .lean(),
+    Edificio.countDocuments({ campana }),
+  ]);
+  res.json(calcularKpis(infracciones, { totalEdificios }));
 });
 
 router.get('/:id', async (req, res) => {

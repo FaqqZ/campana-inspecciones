@@ -147,6 +147,8 @@ const infraccionSchema = new Schema(
     numeroActa: { type: String, required: true, unique: true, trim: true },
     edificio: { type: ObjectId, ref: 'Edificio', required: true, index: true },
     infractor: { type: String, default: '', trim: true },
+    descripcion: { type: String, default: '', trim: true }, // motivo tal como figura en el acta
+    normativa: { type: String, default: '', trim: true },
     inspectoresActuantes: [{ type: ObjectId, ref: 'Inspector' }],
     motivosInfraccion: [{ type: ObjectId, ref: 'MotivoInfraccion' }],
     fechaInfraccion: { type: Date, required: true, index: true },

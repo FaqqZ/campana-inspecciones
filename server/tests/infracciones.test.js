@@ -60,3 +60,33 @@ test('puedePasar: el Tecnico solo desde la oficina inicial', () => {
 test('numeroExpedienteAuto', () => {
   assert.strictEqual(numeroExpedienteAuto(2026, 7), '2026-00007');
 });
+
+// ---------- KPIs ----------
+const { calcularKpis, lunesDe } = require('../services/kpis');
+
+test('kpis: totales, cobertura, antigüedad y agrupaciones', () => {
+  const ed = (id, calle) => ({ _id: id, direccionOriginal: `${calle} 1`, calle });
+  const inf = (fecha, edificio, motivo, extra = {}) => ({
+    fechaInfraccion: new Date(`${fecha}T12:00:00Z`), edificio, estado: { nombre: 'Ingresado' }, oficinaActual: { nombre: 'Oficina Técnica' },
+    motivosInfraccion: [{ nombre: motivo }], expediente: { numero: '' }, asignadoA: null, ...extra,
+  });
+  const k = calcularKpis([
+    inf('2026-09-01', ed('a', 'Mendoza'), 'Falta de extintores'),
+    inf('2026-09-02', ed('a', 'Mendoza'), 'Falta de extintores', { expediente: { numero: 'E-1' } }),
+    inf('2026-09-20', ed('b', 'Córdoba'), 'Faltan luces de emergencia', { asignadoA: 'u1' }),
+  ], { totalEdificios: 4, hoy: new Date('2026-10-01T12:00:00Z') });
+  assert.strictEqual(k.resumen.total, 3);
+  assert.strictEqual(k.resumen.abiertas, 2);
+  assert.strictEqual(k.resumen.pctExpediente, 33);
+  assert.strictEqual(k.resumen.edificiosConActas, 2);
+  assert.strictEqual(k.resumen.pctCobertura, 50);
+  assert.strictEqual(k.resumen.promedioPorEdificio, 1.5);
+  assert.strictEqual(k.resumen.reincidentes, 1);
+  assert.strictEqual(k.resumen.sinAsignar, 1);
+  assert.strictEqual(k.resumen.antiguedadMaxima, 30);
+  assert.deepStrictEqual(k.porMotivo[0], { nombre: 'Falta de extintores', cantidad: 2 });
+  assert.strictEqual(k.antiguedad[1].cantidad, 1);
+  assert.ok(k.porSemana.length >= 3 && k.porSemana.every((s) => s.cantidad >= 0));
+  assert.strictEqual(lunesDe(new Date('2026-09-02T12:00:00Z')), '2026-08-31');
+  assert.deepStrictEqual(calcularKpis([]).porSemana, []);
+});

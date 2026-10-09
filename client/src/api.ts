@@ -111,6 +111,8 @@ export interface Infraccion {
   numeroActa: string;
   edificio: { _id: string; direccionOriginal: string; lat: number | null; lng: number | null };
   infractor: string;
+  descripcion?: string;
+  normativa?: string;
   inspectoresActuantes: { _id: string; nombre: string; legajo?: string }[];
   motivosInfraccion: { _id: string; nombre: string }[];
   fechaInfraccion: string;

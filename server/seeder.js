@@ -2,7 +2,8 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const crypto = require('crypto');
-const { User, Campana } = require('./models');
+const { User, Campana, MotivoInfraccion } = require('./models');
+const { asegurarMotivos } = require('./services/actas');
 const { migrar } = require('./migrateInfracciones');
 
 (async () => {
@@ -20,6 +21,8 @@ const { migrar } = require('./migrateInfracciones');
     await Campana.create({ nombre: `Campaña ${new Date().getFullYear()}`, descripcion: 'Relevamiento general de edificios' });
     console.log('Campaña inicial creada.');
   }
+  await asegurarMotivos(MotivoInfraccion);
+  console.log('Motivos de infracción verificados.');
   await migrar();
   await mongoose.disconnect();
 })().catch((e) => {

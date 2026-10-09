@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const { Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
-const { generarPlantilla, leerHoja, leerCruce, validarFilas } = require('../services/importador');
+const { generarPlantilla, leerHoja, leerCruce, leerActas, validarFilas } = require('../services/importador');
 const { TIPO_CERT, MOTIVO_CERT } = require('../services/catastro');
 const { campanaDe } = require('../services/edificios');
 const { procesarPendientes } = require('../services/geocodificador');
@@ -19,10 +19,10 @@ const upload = multer({
 router.use(protect);
 
 const tipoValido = (req, res, next) =>
-  ['edificios', 'infracciones', 'cruce'].includes(req.params.tipo) ? next() : res.status(404).json({ message: 'Tipo inexistente' });
+  ['edificios', 'infracciones', 'cruce', 'actas'].includes(req.params.tipo) ? next() : res.status(404).json({ message: 'Tipo inexistente' });
 
 router.get('/plantilla/:tipo', tipoValido, (req, res) => {
-  if (req.params.tipo === 'cruce') return res.status(404).json({ message: 'El cruce se carga con el archivo tal cual, sin plantilla' });
+  if (['cruce', 'actas'].includes(req.params.tipo)) return res.status(404).json({ message: 'Este formato se carga con el archivo tal cual, sin plantilla' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="plantilla-${req.params.tipo}.xlsx"`);
   res.send(generarPlantilla(req.params.tipo));
@@ -39,9 +39,9 @@ async function preparar(req) {
   if (!campana) throw fallo('No hay una campaña activa');
   let filas;
   try {
-    filas = req.params.tipo === 'cruce' ? leerCruce(req.file.buffer) : leerHoja(req.file.buffer);
+    filas = { cruce: leerCruce, actas: leerActas }[req.params.tipo]?.(req.file.buffer) ?? leerHoja(req.file.buffer);
   } catch (e) {
-    throw fallo(/cruce/i.test(e.message) ? e.message : 'No se pudo leer el archivo Excel');
+    throw fallo(/cruce|listado de actas/i.test(e.message) ? e.message : 'No se pudo leer el archivo Excel');
   }
   if (!filas.length) throw fallo('El archivo no tiene filas de datos');
   if (filas.length > MAX_FILAS) throw fallo(`El archivo supera el máximo de ${MAX_FILAS} filas`);
@@ -60,6 +60,8 @@ async function preparar(req) {
       Oficina.find({ activo: true }),
       Infraccion.find({}, 'numeroActa').lean(),
     ]);
+    const calles = new Map();
+    if (tipo === 'actas') (await Edificio.find({ campana }, 'calleNorm').lean()).forEach((e) => calles.set(e.calleNorm, (calles.get(e.calleNorm) || 0) + 1));
     const mapa = (docs) => new Map(docs.map((d) => [d.nombreNorm, d._id]));
     ctx = {
       edificios: new Map(edif.map((e) => [e.direccionNorm, String(e._id)])),
@@ -69,7 +71,8 @@ async function preparar(req) {
       oficinas: mapa(ofi),
       existentes: new Set(exist.map((a) => a.numeroActa)),
       crearEdificios: req.body.crearEdificios === 'true',
-      permitirNuevos: req.user.role === 'Administrador' && req.body.crearCatalogos === 'true',
+      permitirNuevos: tipo === 'actas' || (req.user.role === 'Administrador' && req.body.crearCatalogos === 'true'),
+      calles,
     };
   }
   return { campana, ctx, resultado: validarFilas(tipo, filas, ctx) };
@@ -112,7 +115,7 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
     return res.status(e.status || 500).json({ message: e.message });
   }
   const { campana, ctx, resultado } = prep;
-  const validas = resultado.filter((r) => !r.errores.length);
+  let validas = resultado.filter((r) => !r.errores.length);
   if (!validas.length) return res.status(400).json({ message: 'No hay filas válidas para importar' });
 
   const lote = crypto.randomUUID();
@@ -169,7 +172,9 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
     return res.status(201).json({ lote, importadas: docs.length, omitidas: resultado.length - docs.length, geocodificando: true });
   }
 
-  // infracciones
+  // infracciones / actas: las filas unidas ya están incluidas en su acta principal
+  const unidas = validas.filter((r) => r.unida).length;
+  validas = validas.filter((r) => !r.unida);
   const [estadoIni, oficinaIni] = await Promise.all([Estado.findOne({ esInicial: true }), Oficina.findOne({ esInicial: true })]);
   if (!estadoIni || !oficinaIni)
     return res.status(409).json({ message: 'Falta definir el estado y la oficina iniciales en Catálogos' });
@@ -203,6 +208,8 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
       numeroActa: d.numeroActa,
       edificio: d.edificio || ctx.edificios.get(d.dir.direccionNorm),
       infractor: d.infractor,
+      descripcion: d.descripcion || '',
+      normativa: d.normativa || '',
       inspectoresActuantes: d.inspectoresNombres.map((n) => ctx.inspectores.get(norm(n))),
       motivosInfraccion: d.motivosNombres.map((n) => ctx.motivos.get(norm(n))),
       fechaInfraccion: d.fechaInfraccion,
@@ -219,13 +226,13 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
   await Infraccion.insertMany(docs, { ordered: false });
   audit('importar', 'Infraccion', lote, req.user, `${docs.length} infracciones, ${creados.length} edificios nuevos`);
   if (creados.length) procesarPendientes({ campana });
-  res.status(201).json({ lote, importadas: docs.length, edificiosCreados: creados.length, omitidas: resultado.length - docs.length, geocodificando: creados.length > 0 });
+  res.status(201).json({ lote, importadas: docs.length, edificiosCreados: creados.length, unidas, omitidas: resultado.length - docs.length - unidas, geocodificando: creados.length > 0 });
 });
 
 // Revertir un lote. Los edificios con datos cargados después no se pueden revertir.
 router.delete('/:tipo/lote/:lote', tipoValido, authorize(), async (req, res) => {
   const { tipo, lote } = req.params;
-  if (tipo === 'infracciones') {
+  if (tipo === 'infracciones' || tipo === 'actas') {
     const r = await Infraccion.deleteMany({ lotImportacion: lote, 'historialMovimientos.1': { $exists: false }, 'expediente.numero': '' });
     const total = await Infraccion.countDocuments({ lotImportacion: lote });
     if (total) return res.status(409).json({ message: `${total} infracciones del lote ya tuvieron pases o expediente y no se revierten`, eliminadas: r.deletedCount });

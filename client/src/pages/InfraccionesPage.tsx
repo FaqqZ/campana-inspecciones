@@ -141,7 +141,7 @@ export default function InfraccionesPage() {
                   <TableCell>{i.edificio.direccionOriginal}</TableCell>
                   <TableCell>{i.infractor || '—'}</TableCell>
                   <TableCell>{i.inspectoresActuantes.map((x) => x.nombre).join(', ')}</TableCell>
-                  <TableCell><Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>{i.motivosInfraccion.map((m) => <Chip key={m._id} size="small" label={m.nombre} />)}</Stack></TableCell>
+                  <TableCell><Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>{i.motivosInfraccion.map((m) => <Chip key={m._id} size="small" label={m.nombre} />)}</Stack>{i.descripcion && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{i.descripcion}{i.normativa ? ` · ${i.normativa}` : ''}</Typography>}</TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtFecha(i.fechaInfraccion)}</TableCell>
                   <TableCell>
                     <Chip size="small" color={cerrada(i) ? 'success' : i.estado.requiereComentario ? 'warning' : 'default'} label={cerrada(i) ? `Exp. ${i.expediente!.numero}` : i.estado.nombre} />
