@@ -158,7 +158,7 @@ export const setToken = (t: string | null) => {
   }
 };
 
-export const api = axios.create({ baseURL: '/api' });
+export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' });
 api.interceptors.request.use((cfg) => {
   const t = getToken();
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
