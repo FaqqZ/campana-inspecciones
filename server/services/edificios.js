@@ -37,7 +37,7 @@ async function buscarOCrearEdificio({ campana, calle, numero, usuario }) {
   if (n === undefined) return { error: 'Número inválido' };
   const calleNorm = normalizarCalle(calleTxt);
   const direccionNorm = claveDireccion(calleNorm, n);
-  const existente = await Edificio.findOne({ campana, direccionNorm });
+  const existente = await Edificio.findOne({ campana, direccionNorm }).setOptions({ incluirOcultos: true });
   if (existente) return { edificio: existente, creado: false };
   const edificio = await Edificio.create({
     campana, calle: titulo(calleTxt), calleNorm, numero: n, direccionNorm,

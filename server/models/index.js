@@ -107,6 +107,9 @@ const edificioSchema = new Schema(
     conclusionCruce: { type: String, default: '', trim: true },
     mismaCalleOtraAltura: { type: Boolean, default: false },
     enListadoSinCert: { type: Boolean, default: false },
+    // Edificio oculto: no aparece en el mapa, listados, indicadores ni geocodificación (sus datos se conservan)
+    oculto: { type: Boolean, default: false },
+    ocultoMotivo: { type: String, default: '' },
     // Estado anterior de los datos de Catastro, para revertir la última actualización del cruce ({ lote, datos, cert })
     catastroPrevio: { type: Schema.Types.Mixed, default: undefined },
     informe: { type: String, default: '' }, // texto del informe de inspección (Word de edificios sin final de obra)
@@ -118,6 +121,15 @@ const edificioSchema = new Schema(
   { timestamps: true }
 );
 edificioSchema.index({ campana: 1, direccionNorm: 1 }, { unique: true });
+// Los edificios ocultos se excluyen de toda consulta salvo que se pida .setOptions({ incluirOcultos: true }) (importaciones).
+edificioSchema.pre(['find', 'findOne', 'countDocuments', 'distinct', 'findOneAndUpdate', 'findOneAndDelete'], function () {
+  if (this.getOptions().incluirOcultos) return;
+  if (this.getFilter().oculto === undefined) this.where({ oculto: { $ne: true } });
+});
+edificioSchema.pre('aggregate', function () {
+  if (this.options?.incluirOcultos) return;
+  this.pipeline().unshift({ $match: { oculto: { $ne: true } } });
+});
 
 const documentoSchema = new Schema(
   {

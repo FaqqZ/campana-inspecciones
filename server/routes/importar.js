@@ -55,18 +55,18 @@ async function preparar(req) {
   if (tipo === 'cruce') {
     // Los edificios que ya están se actualizan: se cargan con sus datos de Catastro y su certificado para comparar.
     const [ex, tipoDoc] = await Promise.all([
-      Edificio.find({ campana }, `direccionNorm ${CAMPOS_CATASTRO.join(' ')}`).lean(),
+      Edificio.find({ campana }, `direccionNorm ${CAMPOS_CATASTRO.join(' ')}`).setOptions({ incluirOcultos: true }).lean(),
       TipoDocumento.findOne({ nombreNorm: norm(TIPO_CERT) }).lean(),
     ]);
     const certs = tipoDoc ? await DocumentoEdificio.find({ edificio: { $in: ex.map((e) => e._id) }, tipo: tipoDoc._id }, 'edificio presente nroReferencia observaciones').lean() : [];
     const certDe = new Map(certs.map((d) => [String(d.edificio), d]));
     ctx = { existentes: new Map(ex.map((e) => [e.direccionNorm, { ...e, certificado: certDe.get(String(e._id)) || null }])) };
   } else if (tipo === 'edificios') {
-    const ex = await Edificio.find({ campana }, 'direccionNorm').lean();
+    const ex = await Edificio.find({ campana }, 'direccionNorm').setOptions({ incluirOcultos: true }).lean();
     ctx = { existentes: new Set(ex.map((e) => e.direccionNorm)) };
   } else {
     const [edif, mot, insp, est, ofi, exist] = await Promise.all([
-      Edificio.find({ campana }, 'direccionNorm').lean(),
+      Edificio.find({ campana }, 'direccionNorm').setOptions({ incluirOcultos: true }).lean(),
       MotivoInfraccion.find({ activo: true }),
       Inspector.find({ activo: true }),
       Estado.find({ activo: true }),
@@ -117,7 +117,7 @@ async function prepararFotos(req) {
   if (!req.file) throw fallo('Adjuntá un archivo .docx');
   const campana = await campanaDe(req);
   if (!campana) throw fallo('No hay una campaña activa');
-  const edif = await Edificio.find({ campana }, 'direccionNorm calleNorm').lean();
+  const edif = await Edificio.find({ campana }, 'direccionNorm calleNorm').setOptions({ incluirOcultos: true }).lean();
   const calles = new Map();
   edif.forEach((e) => calles.set(e.calleNorm, (calles.get(e.calleNorm) || 0) + 1));
   let extraido;
@@ -219,7 +219,7 @@ async function prepararNotificados(req) {
   }
   if (!filas.length) throw fallo('El archivo no tiene filas de datos');
   if (filas.length > MAX_FILAS) throw fallo(`El archivo supera el máximo de ${MAX_FILAS} filas`);
-  const edif = await Edificio.find({ campana }, 'direccionNorm calleNorm').lean();
+  const edif = await Edificio.find({ campana }, 'direccionNorm calleNorm').setOptions({ incluirOcultos: true }).lean();
   const calles = new Map();
   edif.forEach((e) => calles.set(e.calleNorm, (calles.get(e.calleNorm) || 0) + 1));
   const previas = await Notificacion.find({ edificio: { $in: edif.map((e) => e._id) } }, 'edificio fechaNotificacion fechaVencimiento').lean();
