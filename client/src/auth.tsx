@@ -8,15 +8,19 @@ interface AuthCtx {
   logout: () => void;
 }
 
+// Solo para pruebas de la interfaz sin servidor (VITE_SIN_LOGIN=true en el build): entra sin credenciales.
+export const SIN_LOGIN = import.meta.env.VITE_SIN_LOGIN === 'true';
+const USUARIO_PRUEBA: Usuario = { id: 'prueba', nombres: 'Prueba', apellidos: 'Sin login', username: 'prueba', role: 'Administrador' };
+
 const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
 export const useAuth = () => useContext(Ctx);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<Usuario | null>(null);
-  const [loading, setLoading] = useState(!!getToken());
+  const [user, setUser] = useState<Usuario | null>(SIN_LOGIN ? USUARIO_PRUEBA : null);
+  const [loading, setLoading] = useState(!SIN_LOGIN && !!getToken());
 
   useEffect(() => {
-    if (!getToken()) return;
+    if (SIN_LOGIN || !getToken()) return;
     api
       .get('/auth/me')
       .then((r) => setUser(r.data))

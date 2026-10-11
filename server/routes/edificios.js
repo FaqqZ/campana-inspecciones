@@ -1,8 +1,11 @@
 const router = require('express').Router();
-const { Edificio, DocumentoEdificio, Infraccion, Inspeccion, ESTADOS_INSPECCION } = require('../models');
+const { Edificio, DocumentoEdificio, FotoEdificio, Notificacion, Infraccion, Inspeccion, ESTADOS_INSPECCION } = require('../models');
+const fotosStore = require('../services/fotosStore');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
+const { calcularKpisEdificios } = require('../services/kpis');
 const { campanaDe, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe } = require('../services/edificios');
 const { evaluarEdificio } = require('../services/semaforo');
+const { vigentesPorEdificio, estadoPlazo, diasRestantes } = require('../services/notificaciones');
 const { normalizarCalle, parseNumero, claveDireccion, titulo } = require('../services/direcciones');
 const { procesarPendientes } = require('../services/geocodificador');
 
@@ -16,12 +19,43 @@ router.get('/mapa', async (req, res) => {
   const filtro = await aplicarInfracciones(filtroBase(campana, req.query), req.query);
   const todos = await Edificio.find(filtro).select('direccionOriginal lat lng geoEstado estadoInspeccion').lean();
   const sem = await semaforosDe(todos.map((e) => e._id));
-  let lista = todos.map((e) => ({ ...e, semaforo: sem.get(String(e._id)) }));
+  const fotos = new Map((await FotoEdificio.aggregate([{ $group: { _id: '$edificio', n: { $sum: 1 } } }])).map((f) => [String(f._id), f.n]));
+  const vigentes = vigentesPorEdificio(await Notificacion.find({ edificio: { $in: todos.map((e) => e._id) } }).lean());
+  const plazoDe = (id) => (vigentes.has(String(id)) ? estadoPlazo(vigentes.get(String(id)).fechaVencimiento, new Date(), vigentes.get(String(id)).resultado) : null);
+  let lista = todos.map((e) => ({ ...e, semaforo: sem.get(String(e._id)), fotos: fotos.get(String(e._id)) || 0, plazo: plazoDe(e._id) }));
+  if (req.query.notificado === 'si') lista = lista.filter((e) => e.plazo);
+  else if (req.query.notificado) lista = lista.filter((e) => e.plazo === req.query.notificado);
+  if (req.query.conFotos === 'si') lista = lista.filter((e) => e.fotos > 0);
   if (req.query.semaforo) lista = lista.filter((e) => e.semaforo === req.query.semaforo);
   const puntos = lista
     .filter((e) => e.lat !== null && e.lng !== null)
-    .map((e) => ({ id: e._id, lat: e.lat, lng: e.lng, direccion: e.direccionOriginal, semaforo: e.semaforo, estadoInspeccion: e.estadoInspeccion, geoEstado: e.geoEstado }));
+    .map((e) => ({ id: e._id, lat: e.lat, lng: e.lng, direccion: e.direccionOriginal, semaforo: e.semaforo, estadoInspeccion: e.estadoInspeccion, geoEstado: e.geoEstado, fotos: e.fotos, plazo: e.plazo }));
   res.json({ puntos, total: lista.length, sinUbicar: lista.length - puntos.length });
+});
+
+// Indicadores de edificios y del cruce Catastro / Defensa Civil
+router.get('/kpis', async (req, res) => {
+  const campana = await campanaDe(req);
+  const edificios = await Edificio.find({ campana }).select('calle padron estadoObra conclusionCruce enListadoSinCert mismaCalleOtraAltura geoEstado estadoInspeccion').lean();
+  const ids = edificios.map((e) => e._id);
+  const [sem, presentes, actas] = await Promise.all([
+    semaforosDe(ids),
+    DocumentoEdificio.find({ edificio: { $in: ids }, presente: true }).select('edificio').lean(),
+    Infraccion.find({ edificio: { $in: ids }, eliminado: false }).select('edificio expediente.numero').lean(),
+  ]);
+  const abiertas = new Map();
+  const totales = new Map();
+  actas.forEach((a) => {
+    const k = String(a.edificio);
+    totales.set(k, (totales.get(k) || 0) + 1);
+    if (!a.expediente?.numero) abiertas.set(k, (abiertas.get(k) || 0) + 1);
+  });
+  res.json(calcularKpisEdificios(edificios, {
+    conCertificado: new Set(presentes.map((d) => String(d.edificio))),
+    semaforos: sem,
+    actasAbiertas: abiertas,
+    actasTotales: totales,
+  }));
 });
 
 // Autocompletado de calles
@@ -104,7 +138,7 @@ router.post('/', permitir('editarEdificios'), async (req, res) => {
 router.get('/:id', async (req, res) => {
   const e = await Edificio.findById(req.params.id).lean();
   if (!e) return res.status(404).json({ message: 'No encontrado' });
-  const [tipos, documentos, infracciones, inspecciones] = await Promise.all([
+  const [tipos, documentos, infracciones, inspecciones, fotos, notificaciones] = await Promise.all([
     tiposActivos(),
     DocumentoEdificio.find({ edificio: e._id }).lean(),
     Infraccion.find({ edificio: e._id, eliminado: false })
@@ -115,8 +149,10 @@ router.get('/:id', async (req, res) => {
       .populate('oficinaActual', 'nombre')
       .lean(),
     Inspeccion.find({ edificio: e._id }).sort('-fecha').populate('inspector', 'nombre').lean(),
+    FotoEdificio.find({ edificio: e._id }).sort('orden createdAt').select('nombreOriginal descripcion tipo').lean(),
+    Notificacion.find({ edificio: e._id }).sort('-fechaNotificacion').lean(),
   ]);
-  const ev = evaluarEdificio(tipos, documentos);
+  const ev = evaluarEdificio(tipos, documentos, new Date(), { conInfracciones: infracciones.length > 0 });
   res.json({
     edificio: e,
     semaforo: ev.semaforo,
@@ -124,7 +160,27 @@ router.get('/:id', async (req, res) => {
     infraccionesPotenciales: ev.infraccionesPotenciales,
     infracciones,
     inspecciones,
+    fotos,
+    notificaciones: notificaciones.map((n) => ({ ...n, estadoPlazo: estadoPlazo(n.fechaVencimiento, new Date(), n.resultado), diasRestantes: diasRestantes(n.fechaVencimiento) })),
   });
+});
+
+// Archivo de una foto (solo con sesión iniciada)
+router.get('/:id/fotos/:fotoId', async (req, res) => {
+  const f = await FotoEdificio.findOne({ _id: req.params.fotoId, edificio: req.params.id }).lean();
+  const p = f && fotosStore.ruta(f.edificio, f.archivo);
+  if (!p) return res.status(404).json({ message: 'No encontrada' });
+  res.type(f.tipo);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.sendFile(p, (err) => { if (err && !res.headersSent) res.status(404).json({ message: 'No encontrada' }); });
+});
+
+router.delete('/:id/fotos/:fotoId', permitir('editarEdificios'), async (req, res) => {
+  const f = await FotoEdificio.findOneAndDelete({ _id: req.params.fotoId, edificio: req.params.id });
+  if (!f) return res.status(404).json({ message: 'No encontrada' });
+  await fotosStore.borrar(f.edificio, f.archivo);
+  audit('eliminar-foto', 'Edificio', req.params.id, req.user, f.nombreOriginal);
+  res.json({ ok: true });
 });
 
 // Datos del edificio
@@ -187,6 +243,7 @@ router.delete('/:id', authorize(), async (req, res) => {
     DocumentoEdificio.deleteMany({ edificio: e._id }),
     Infraccion.deleteMany({ edificio: e._id }),
     Inspeccion.deleteMany({ edificio: e._id }),
+    Notificacion.deleteMany({ edificio: e._id }),
   ]);
   audit('eliminar', 'Edificio', e._id, req.user, e.direccionOriginal);
   res.json({ ok: true });

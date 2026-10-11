@@ -104,7 +104,7 @@ export default function EdificiosPage() {
             {can(user?.role, 'editarEdificios') && <Button variant="contained" onClick={() => setNuevo({ calle: '', numero: '', titular: '', uso: '', observaciones: '' })}>Agregar edificio</Button>}
             {can(user?.role, 'editarEdificios') && (resumen?.porGeo.fallido || 0) > 0 && <Button onClick={reintentar}>Reintentar no encontradas</Button>}
           </Stack>
-          <Table size="small">
+          <Box sx={{ overflowX: 'auto' }}><Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>Dirección</TableCell><TableCell>Ubicación</TableCell><TableCell>Documentación</TableCell>
@@ -128,7 +128,7 @@ export default function EdificiosPage() {
               ))}
               {!items.length && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>No hay edificios con esos filtros.</TableCell></TableRow>}
             </TableBody>
-          </Table>
+          </Table></Box>
           {total > LIMITE && <Pagination sx={{ mt: 2 }} count={Math.ceil(total / LIMITE)} page={page} onChange={(_, p) => setPage(p)} />}
         </Paper>
       </Stack>

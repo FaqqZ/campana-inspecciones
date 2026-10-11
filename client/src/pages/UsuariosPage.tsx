@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   Alert, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem,
   Paper, Snackbar, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
+  Box,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import { api, errMsg, Rol, Usuario } from '../api';
@@ -58,7 +59,7 @@ export default function UsuariosPage() {
         </Stack>
         {error && <Alert severity="error">{error}</Alert>}
         <Paper sx={{ p: 1 }}>
-          <Table size="small">
+          <Box sx={{ overflowX: 'auto' }}><Table size="small">
             <TableHead><TableRow><TableCell>Nombre</TableCell><TableCell>Usuario</TableCell><TableCell>Rol</TableCell><TableCell>Estado</TableCell><TableCell align="right" /></TableRow></TableHead>
             <TableBody>
               {lista.map((u) => (
@@ -71,7 +72,7 @@ export default function UsuariosPage() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </Table></Box>
         </Paper>
       </Stack>
 

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import FotosEdificio, { AvisoFinalDeObra } from './FotosEdificio';
+import NotificacionesEdificio from './NotificacionesEdificio';
 import {
   Alert, Box, Button, Checkbox, Chip, FormControlLabel, IconButton, MenuItem, Paper, Stack, Tab, Tabs,
   TextField, Typography, Divider,
@@ -103,7 +105,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
   const e = ficha?.edificio;
 
   return (
-    <Paper square sx={{ width: 440, flexShrink: 0, display: 'flex', flexDirection: 'column', borderWidth: '0 0 0 1px', overflow: 'hidden' }}>
+    <Paper square sx={{ width: { xs: '100%', md: 440 }, flexShrink: 0, display: 'flex', flexDirection: 'column', borderWidth: '0 0 0 1px', overflow: 'hidden', position: { xs: 'absolute', md: 'static' }, inset: { xs: 0, md: 'auto' }, zIndex: { xs: 1200, md: 'auto' } }}>
       <Box sx={{ p: 2, pb: 1 }}>
         <Stack direction="row" alignItems="flex-start" spacing={1}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -125,17 +127,20 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
         )}
         {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
       </Box>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider' }}>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Datos" />
         <Tab label="Papeles" />
         <Tab label={`Infracciones${ficha ? ` (${ficha.infracciones.length})` : ''}`} />
         <Tab label={`Visitas${ficha ? ` (${ficha.inspecciones.length})` : ''}`} />
+        <Tab label={`Fotos${ficha ? ` (${ficha.fotos?.length ?? 0})` : ''}`} />
+        <Tab label={`Notificación${ficha?.notificaciones?.length ? ` (${ficha.notificaciones.length})` : ''}`} />
       </Tabs>
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         {ficha && e && tab === 0 && (
           <Stack spacing={2}>
             {e.geoDisplayName && <Typography variant="caption" color="text.secondary">OSM: {e.geoDisplayName}</Typography>}
+            <AvisoFinalDeObra e={e} />
             {(e.padron || e.estadoObra) && (
               <Paper sx={{ p: 1.5 }}>
                 <Typography variant="subtitle2" gutterBottom>Catastro</Typography>
@@ -218,6 +223,8 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
           </Stack>
         )}
 
+        {ficha && e && tab === 5 && <NotificacionesEdificio edificioId={id} notificaciones={ficha.notificaciones ?? []} puedeEditar={puedeEditar} onCambio={tras} />}
+        {ficha && e && tab === 4 && <FotosEdificio edificio={e} fotos={ficha.fotos ?? []} puedeEditar={puedeEditar} onCambio={tras} />}
         {ficha && e && tab === 3 && (
           <Stack spacing={1.5}>
             {ficha.inspecciones.length === 0 && <Typography variant="body2" color="text.secondary">Todavía no hay visitas registradas.</Typography>}

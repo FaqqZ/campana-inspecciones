@@ -70,7 +70,7 @@ const limpiar = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 function parseDomicilio(texto) {
   const s = limpiar(texto).replace(/\.(?=\S)/g, '. ');
   if (!s) return { error: 'Domicilio es obligatorio' };
-  let m = s.match(/^(.*?)\s*\bN\s*[°º:.]*\s*(\d{1,6})(?:\s*(?:\/|-|al)\s*\d+)?\s*$/i);
+  let m = s.match(/^(.*?)(?:^|\s)N\s*[°º:.]*\s*(\d{1,6})(?:\s*(?:\/|-|al)\s*\d+)?\s*$/i);
   if (m && m[1]) return { calle: m[1].trim(), numero: Number(m[2]), esquina: '', texto: s };
   m = s.match(/^(.*?)\s*\besq(?:uina)?\b\.?\s*(\S.*)$/i) || s.match(/^(.*?)esq\.?\s*(\S.*)$/i);
   if (m && m[1]) return { calle: m[1].trim(), numero: null, esquina: limpiar(m[2]), texto: s };

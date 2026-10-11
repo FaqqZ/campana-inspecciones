@@ -107,6 +107,8 @@ const edificioSchema = new Schema(
     conclusionCruce: { type: String, default: '', trim: true },
     mismaCalleOtraAltura: { type: Boolean, default: false },
     enListadoSinCert: { type: Boolean, default: false },
+    informe: { type: String, default: '' }, // texto del informe de inspección (Word de edificios sin final de obra)
+    informeLote: { type: String, default: '' },
     origen: { type: String, enum: ['excel', 'manual'], default: 'manual' },
     lotImportacion: { type: String, index: true },
     creadoPor: { type: ObjectId, ref: 'User' },
@@ -129,6 +131,43 @@ const documentoSchema = new Schema(
   { timestamps: true }
 );
 documentoSchema.index({ edificio: 1, tipo: 1 }, { unique: true });
+
+const fotoEdificioSchema = new Schema(
+  {
+    edificio: { type: ObjectId, ref: 'Edificio', required: true, index: true },
+    archivo: { type: String, required: true }, // nombre en disco (server/uploads/edificios/<edificio>/)
+    nombreOriginal: { type: String, default: '' },
+    tipo: { type: String, default: 'image/jpeg' },
+    tamano: { type: Number, default: 0 },
+    orden: { type: Number, default: 0 },
+    descripcion: { type: String, default: '', trim: true },
+    lotImportacion: { type: String, index: true },
+    creadoPor: { type: ObjectId, ref: 'User' },
+  },
+  { timestamps: true }
+);
+
+const notificacionSchema = new Schema(
+  {
+    edificio: { type: ObjectId, ref: 'Edificio', required: true, index: true },
+    fechaNotificacion: { type: Date, required: true },
+    plazoDias: { type: Number, default: null, min: 1, max: 3650 }, // null: notificado sin plazo registrado todavía
+    fechaVencimiento: { type: Date, default: null, index: true }, // vigente (con prórrogas)
+    observaciones: { type: String, default: '', trim: true }, // última novedad de la planilla
+    boleta: { type: String, default: '', trim: true, index: true },
+    razonSocial: { type: String, default: '', trim: true },
+    inspector: { type: String, default: '', trim: true },
+    plazoOriginal: { type: String, default: '', trim: true }, // tal como figura en la planilla ("72 hs vence 9/10/26")
+    vencimientoOriginal: { type: Date, default: null }, // antes de las prórrogas; fechaVencimiento es el vigente
+    prorroga: { type: Boolean, default: false },
+    resultado: { type: String, enum: ['', 'presento', 'acta'], default: '' }, // presentó documentación / pasó a acta
+    origen: { type: String, enum: ['excel', 'manual'], default: 'manual' },
+    lotImportacion: { type: String, index: true },
+    creadoPor: { type: ObjectId, ref: 'User' },
+  },
+  { timestamps: true }
+);
+notificacionSchema.index({ edificio: 1, fechaNotificacion: -1 });
 
 const movimientoSchema = new Schema(
   {
@@ -221,6 +260,8 @@ module.exports = {
   TipoDocumento: mongoose.model('TipoDocumento', tipoDocumentoSchema),
   Edificio: mongoose.model('Edificio', edificioSchema),
   DocumentoEdificio: mongoose.model('DocumentoEdificio', documentoSchema),
+  FotoEdificio: mongoose.model('FotoEdificio', fotoEdificioSchema),
+  Notificacion: mongoose.model('Notificacion', notificacionSchema),
   Estado: mongoose.model('Estado', estadoSchema),
   Oficina: mongoose.model('Oficina', oficinaSchema),
   Infraccion: mongoose.model('Infraccion', infraccionSchema),

@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   Alert, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton,
   MenuItem, Paper, Stack, Switch, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, TextField, Typography,
+  Box,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
@@ -67,7 +68,7 @@ export default function CatalogosPage() {
         {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
         <Paper sx={{ p: 2 }}>
           {puedeEditar && <Stack direction="row" sx={{ mb: 1 }}><Button variant="contained" onClick={() => setEdit(nuevo())}>Agregar</Button></Stack>}
-          <Table size="small">
+          <Box sx={{ overflowX: 'auto' }}><Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>Nombre</TableCell>
@@ -109,7 +110,7 @@ export default function CatalogosPage() {
               ))}
               {!items.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>Todavía no hay registros.</TableCell></TableRow>}
             </TableBody>
-          </Table>
+          </Table></Box>
         </Paper>
       </Stack>
 

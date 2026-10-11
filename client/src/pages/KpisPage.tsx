@@ -3,6 +3,19 @@ import { Alert, Box, CircularProgress, Container, Paper, Stack, TextField, Toolt
 import { api, errMsg } from '../api';
 
 interface Item { nombre: string; cantidad: number }
+interface KpisEdificios {
+  resumen: {
+    total: number; delCruce: number; creadosDesdeActas: number; conCertificado: number; pctCertificado: number; sinCertificado: number; sinRelevar: number;
+    sinFinalCatastro: number; pctSinFinalCatastro: number;
+    sinCertConActasAbiertas: number; sinCertSinActas: number; conActas: number; sinUbicar: number;
+  };
+  porSituacion: Item[];
+  porEstadoObra: Item[]; porSemaforo: Item[]; porInspeccion: Item[]; porGeo: Item[]; sinCertPorCalle: Item[];
+}
+interface KpisNotif {
+  resumen: { notificados: number; notificaciones: number; enPlazo: number; porVencer: number; vencidos: number; presentaron: number; pasaronAActa: number; sinPlazo: number; conProrroga: number; vencenEn7: number; vencenEn30: number; plazoPromedio: number };
+  porEstado: Item[]; porCalle: Item[]; porMesVencimiento: Item[];
+}
 interface Kpis {
   resumen: {
     total: number; abiertas: number; conExpediente: number; pctExpediente: number; edificiosConActas: number; totalEdificios: number;
@@ -89,7 +102,16 @@ export default function KpisPage() {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
   const [k, setK] = useState<Kpis | null>(null);
+  const [ek, setEk] = useState<KpisEdificios | null>(null);
+  const [nk, setNk] = useState<KpisNotif | null>(null);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let vivo = true;
+    api.get('/notificaciones/kpis').then((r) => vivo && setNk(r.data)).catch(() => {});
+    api.get('/edificios/kpis').then((r) => vivo && setEk(r.data)).catch((e) => vivo && setError(errMsg(e)));
+    return () => { vivo = false; };
+  }, []);
 
   useEffect(() => {
     let vivo = true;
@@ -101,15 +123,61 @@ export default function KpisPage() {
   }, [desde, hasta]);
 
   const r = k?.resumen;
+  const inspeccionados = ek ? ek.porInspeccion.filter((x) => x.nombre !== 'Pendiente').reduce((n, x) => n + x.cantidad, 0) : 0;
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
       <Stack spacing={3}>
+        <Typography variant="h5">Indicadores</Typography>
+        {error && <Alert severity="error">{error}</Alert>}
+        {ek && (
+          <>
+            <Typography variant="h6">Edificios y Catastro</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: '-16px !important' }}>
+              Sobre todos los edificios cargados (cruce de Catastro / Defensa Civil y edificios creados desde las actas). No dependen del período.
+            </Typography>
+            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
+              <Tile titulo="Edificios cargados" valor={num(ek.resumen.total)} detalle={`${num(ek.resumen.delCruce)} del cruce · ${num(ek.resumen.creadosDesdeActas)} creados desde actas`} />
+              <Tile
+                titulo="Edificios inspeccionados"
+                valor={num(inspeccionados)}
+                detalle={`${ek.resumen.total ? Math.round((inspeccionados / ek.resumen.total) * 100) : 0}% del total · los que tienen actas de infracción`}
+              />
+              <Tile titulo="Con certificado final" valor={num(ek.resumen.conCertificado)} detalle={`${ek.resumen.pctCertificado}% del total`} />
+              <Tile titulo="Sin certificado final" valor={num(ek.resumen.sinCertificado)} detalle={`${num(ek.resumen.sinRelevar)} más sin relevar`} />
+              <Tile titulo="Sin final de obra (Catastro)" valor={num(ek.resumen.sinFinalCatastro)} detalle={`${ek.resumen.pctSinFinalCatastro}% del total`} />
+              <Tile titulo="Sin certificado con actas abiertas" valor={num(ek.resumen.sinCertConActasAbiertas)} detalle={`${num(ek.resumen.sinCertSinActas)} sin certificado ni actas`} />
+            </Stack>
+            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
+              <Panel titulo="Calles con más edificios sin certificado"><Barras items={ek.sinCertPorCalle} total={ek.resumen.sinCertificado} /></Panel>
+            </Stack>
+            {nk && nk.resumen.notificados > 0 && (
+              <>
+                <Typography variant="h6" sx={{ pt: 1 }}>Edificios notificados</Typography>
+                <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
+                  <Tile titulo="Edificios notificados" valor={num(nk.resumen.notificados)} detalle={`plazo promedio de ${nk.resumen.plazoPromedio} días`} />
+                  <Tile titulo="En plazo" valor={num(nk.resumen.enPlazo)} detalle={`${Math.round((nk.resumen.enPlazo / nk.resumen.notificados) * 100)}% de los notificados`} />
+                  <Tile titulo="Por vencer" valor={num(nk.resumen.porVencer)} detalle="faltan 10 días o menos" />
+                  <Tile titulo="Vencidos" valor={num(nk.resumen.vencidos)} detalle={`${Math.round((nk.resumen.vencidos / nk.resumen.notificados) * 100)}% de los notificados`} />
+                  <Tile titulo="Presentaron documentación" valor={num(nk.resumen.presentaron)} detalle={`${num(nk.resumen.conProrroga)} con prórroga`} />
+                  <Tile titulo="Pasaron a acta" valor={num(nk.resumen.pasaronAActa)} detalle="vencido el plazo, pase al Dep. Técnico" />
+                  {nk.resumen.sinPlazo > 0 && <Tile titulo="Sin plazo registrado" valor={num(nk.resumen.sinPlazo)} detalle="notificados, falta cargar el plazo" />}
+                  <Tile titulo="Vencen en 7 días" valor={num(nk.resumen.vencenEn7)} detalle={`${num(nk.resumen.vencenEn30)} en los próximos 30 días`} />
+                </Stack>
+                <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
+                  <Panel titulo="Notificados según su plazo" ancho={300}><Barras items={nk.porEstado} total={nk.resumen.notificados} /></Panel>
+                  <Panel titulo="Vencimientos por mes" ancho={300}><Barras items={nk.porMesVencimiento} /></Panel>
+                  <Panel titulo="Calles con más notificados" ancho={300}><Barras items={nk.porCalle} total={nk.resumen.notificados} /></Panel>
+                </Stack>
+              </>
+            )}
+            <Typography variant="h6" sx={{ pt: 1 }}>Infracciones</Typography>
+          </>
+        )}
         <Stack direction="row" alignItems="center" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-          <Typography variant="h5" sx={{ flex: 1 }}>Indicadores</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>Las actas de infracción se pueden filtrar por fecha.</Typography>
           <TextField size="small" type="date" label="Infracciones desde" InputLabelProps={{ shrink: true }} value={desde} onChange={(e) => setDesde(e.target.value)} />
           <TextField size="small" type="date" label="Hasta" InputLabelProps={{ shrink: true }} value={hasta} onChange={(e) => setHasta(e.target.value)} />
         </Stack>
-        {error && <Alert severity="error">{error}</Alert>}
         {!k && !error && <Box sx={{ p: 6, textAlign: 'center' }}><CircularProgress /></Box>}
         {k && r && (r.total === 0 ? (
           <Alert severity="info">No hay infracciones cargadas en el período elegido.</Alert>

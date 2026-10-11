@@ -1,5 +1,5 @@
 // Consultas compartidas sobre edificios.
-const { Campana, TipoDocumento, DocumentoEdificio, Infraccion, Edificio } = require('../models');
+const { Campana, TipoDocumento, DocumentoEdificio, Infraccion, Edificio, Inspeccion } = require('../models');
 const { evaluarEdificio } = require('./semaforo');
 const { normalizarCalle, parseNumero, claveDireccion, titulo } = require('./direcciones');
 
@@ -50,7 +50,12 @@ const tiposActivos = () => TipoDocumento.find({ activo: true }).sort('orden nomb
 
 /** Map(edificioId -> semaforo) calculado con una sola consulta de documentos. */
 async function semaforosDe(ids) {
-  const [tipos, docs] = await Promise.all([tiposActivos(), DocumentoEdificio.find({ edificio: { $in: ids } }).lean()]);
+  const [tipos, docs, conActas] = await Promise.all([
+    tiposActivos(),
+    DocumentoEdificio.find({ edificio: { $in: ids } }).lean(),
+    Infraccion.distinct('edificio', { edificio: { $in: ids }, eliminado: { $ne: true } }),
+  ]);
+  const actas = new Set(conActas.map(String));
   const porEdificio = new Map();
   docs.forEach((d) => {
     const k = String(d.edificio);
@@ -58,7 +63,22 @@ async function semaforosDe(ids) {
     porEdificio.get(k).push(d);
   });
   const hoy = new Date();
-  return new Map(ids.map((id) => [String(id), evaluarEdificio(tipos, porEdificio.get(String(id)) || [], hoy).semaforo]));
+  return new Map(ids.map((id) => [String(id), evaluarEdificio(tipos, porEdificio.get(String(id)) || [], hoy, { conInfracciones: actas.has(String(id)) }).semaforo]));
 }
 
-module.exports = { buscarOCrearEdificio, campanaDe, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe };
+/**
+ * El estado de inspección acompaña a las infracciones: un edificio con actas está "inspeccionado" (fue visitado por Defensa Civil).
+ * Pasa de pendiente a inspeccionado al tener su primera acta, y vuelve a pendiente si se queda sin actas ni visitas registradas.
+ * Los estados observado / regularizado (puestos a mano) no se tocan. ids: lista de ids de edificio, o null para todos.
+ */
+async function sincronizarInspeccion(ids = null) {
+  const filtro = ids ? { edificio: { $in: ids } } : {};
+  const con = await Infraccion.distinct('edificio', { ...filtro, eliminado: { $ne: true } });
+  const alcance = ids ? { _id: { $in: ids } } : {};
+  const a = await Edificio.updateMany({ _id: { $in: con }, estadoInspeccion: 'pendiente' }, { estadoInspeccion: 'inspeccionado' });
+  const conVisitas = await Inspeccion.distinct('edificio', ids ? { edificio: { $in: ids } } : {});
+  const b = await Edificio.updateMany({ ...alcance, _id: { ...(alcance._id || {}), $nin: [...con, ...conVisitas] }, estadoInspeccion: 'inspeccionado' }, { estadoInspeccion: 'pendiente' });
+  return { inspeccionados: a.modifiedCount, pendientes: b.modifiedCount };
+}
+
+module.exports = { sincronizarInspeccion, buscarOCrearEdificio, campanaDe, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe };

@@ -169,3 +169,10 @@ test('actas: corrige un error de tipeo en la calle y avisa de actas con distinta
   assert.ok(r[2].avisos.some((a) => a.includes('corregida')));
   assert.ok(r[2].avisos.some((a) => a.includes('5 dígitos')));
 });
+
+test('actas: una N final de una palabra con tilde no se toma como marcador de número', () => {
+  const d = parseDomicilio('San Martín 1051');
+  assert.deepStrictEqual([d.calle, d.numero], ['San Martín', 1051]);
+  assert.strictEqual(parseDomicilio('Concepción 12').calle, 'Concepción');
+  assert.strictEqual(parseDomicilio('Mendoza N°490').numero, 490);
+});

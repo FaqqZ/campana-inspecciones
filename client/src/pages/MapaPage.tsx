@@ -4,7 +4,7 @@ import {
   Alert, Autocomplete, Box, Button, Chip, Divider, MenuItem, Paper, Snackbar, Stack, TextField, Typography,
 } from '@mui/material';
 import { api, errMsg, PuntoMapa } from '../api';
-import { INSPECCION_LABEL, GEO_LABEL, SEMAFORO } from '../semaforo';
+import { INSPECCION_LABEL, PLAZO, SEMAFORO } from '../semaforo';
 import { useMapa } from '../store';
 import MapaView from '../components/MapaView';
 import FichaEdificio from '../components/FichaEdificio';
@@ -25,6 +25,7 @@ export default function MapaPage() {
   const [error, setError] = useState('');
   const [posNueva, setPosNueva] = useState<[number, number] | null>(null);
   const [geo, setGeo] = useState({ pendientes: 0, total: 0 });
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
 
   // Abrir un edificio desde otra pantalla (/?ver=ID&mover=1)
   useEffect(() => {
@@ -87,10 +88,14 @@ export default function MapaPage() {
   const puedeEditar = can(user?.role, 'editarEdificios');
 
   return (
-    <Box sx={{ display: 'flex', height: '100%', position: 'relative' }}>
-      <Paper square sx={{ width: 300, flexShrink: 0, p: 2, overflow: 'auto', borderWidth: '0 1px 0 0' }}>
+    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, height: '100%', position: 'relative' }}>
+      <Paper square sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0, p: 2, overflow: 'auto', borderWidth: { xs: '0 0 1px 0', md: '0 1px 0 0' }, maxHeight: { xs: filtrosAbiertos ? '55%' : 'none', md: 'none' } }}>
         <Stack spacing={2}>
-          <Typography variant="subtitle1" fontWeight={600}>Filtros</Typography>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Typography variant="subtitle1" fontWeight={600}>Filtros</Typography>
+            <Button size="small" sx={{ display: { md: 'none' } }} onClick={() => setFiltrosAbiertos((v) => !v)}>{filtrosAbiertos ? 'Ocultar' : 'Mostrar'}</Button>
+          </Stack>
+          <Stack spacing={2} sx={{ display: { xs: filtrosAbiertos ? 'flex' : 'none', md: 'flex' } }}>
           <Autocomplete
             freeSolo
             options={calles}
@@ -109,14 +114,19 @@ export default function MapaPage() {
             <MenuItem value="">Todas</MenuItem>
             {Object.entries(INSPECCION_LABEL).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
           </TextField>
-          <TextField select size="small" label="Calidad de ubicación" value={filtros.geoEstado} onChange={(e) => setFiltro('geoEstado', e.target.value)}>
-            <MenuItem value="">Todas</MenuItem>
-            {Object.entries(GEO_LABEL).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
-          </TextField>
           <TextField select size="small" label="Infracciones" value={filtros.conInfraccion} onChange={(e) => setFiltro('conInfraccion', e.target.value)}>
             <MenuItem value="">Todos los edificios</MenuItem>
             <MenuItem value="si">Con infracciones cargadas</MenuItem>
             <MenuItem value="no">Sin infracciones</MenuItem>
+          </TextField>
+          <TextField select size="small" label="Fotos" value={filtros.conFotos} onChange={(e) => setFiltro('conFotos', e.target.value)}>
+            <MenuItem value="">Todos los edificios</MenuItem>
+            <MenuItem value="si">Con fotos cargadas</MenuItem>
+          </TextField>
+          <TextField select size="small" label="Notificación" value={filtros.notificado} onChange={(e) => setFiltro('notificado', e.target.value)}>
+            <MenuItem value="">Todos los edificios</MenuItem>
+            <MenuItem value="si">Notificados</MenuItem>
+            {Object.entries(PLAZO).map(([k, v]) => <MenuItem key={k} value={k}>{v.label}</MenuItem>)}
           </TextField>
           <Button size="small" onClick={() => { limpiar(); setTextoCalle(''); }}>Limpiar filtros</Button>
           <Divider />
@@ -133,10 +143,11 @@ export default function MapaPage() {
             ))}
           </Stack>
           {error && <Alert severity="error">{error}</Alert>}
+          </Stack>
         </Stack>
       </Paper>
 
-      <Box sx={{ flex: 1, position: 'relative', minWidth: 0 }}>
+      <Box sx={{ flex: 1, position: 'relative', minWidth: 0, minHeight: { xs: 280, md: 0 } }}>
         <MapaView
           puntos={puntos}
           claveFiltros={claveFiltros}
@@ -148,12 +159,12 @@ export default function MapaPage() {
           onMover={mover}
         />
         {geo.pendientes > 0 && (
-          <Alert severity="info" sx={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000 }}>
+          <Alert severity="info" sx={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, maxWidth: 'calc(100% - 24px)', width: 'max-content' }}>
             Ubicando direcciones: {geo.total - geo.pendientes} de {geo.total}. Los puntos aparecen a medida que se encuentran.
           </Alert>
         )}
         {moviendo && (
-          <Alert severity="info" sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1000 }}
+          <Alert severity="info" sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, maxWidth: 'calc(100% - 24px)', width: 'max-content' }}
             action={<Button color="inherit" size="small" onClick={() => setMoviendo(false)}>Cancelar</Button>}>
             Hacé clic en el mapa{puntoSel ? ' o arrastrá el marcador' : ''} para fijar la ubicación
           </Alert>

@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const { Infraccion, Inspector, MotivoInfraccion, Estado, Oficina, Edificio } = require('../models');
 const { protect, permitir, audit } = require('../middleware/auth');
-const { campanaDe, buscarOCrearEdificio, escapar } = require('../services/edificios');
+const { campanaDe, buscarOCrearEdificio, escapar, sincronizarInspeccion } = require('../services/edificios');
 const { normalizarCalle } = require('../services/direcciones');
 const { validarDatos, validarPase, puedePasar, esEditable, esCerrada, numeroExpedienteAuto } = require('../services/infracciones');
 const { procesarPendientes } = require('../services/geocodificador');
@@ -143,6 +143,7 @@ router.post('/', permitir('editarInfracciones'), async (req, res) => {
     origen: 'manual',
     creadoPor: req.user._id,
   });
+  await sincronizarInspeccion([edificio._id]);
   audit('crear', 'Infraccion', inf._id, req.user, `${inf.numeroActa} · ${edificio.direccionOriginal}`);
   if (creado) {
     audit('crear', 'Edificio', edificio._id, req.user, `${edificio.direccionOriginal} (desde infracción)`);
@@ -246,6 +247,7 @@ router.delete('/:id', permitir('eliminarInfracciones'), async (req, res) => {
   inf.motivoEliminacion = motivo;
   inf.eliminadoPor = req.user._id;
   await inf.save();
+  await sincronizarInspeccion([inf.edificio]);
   audit('eliminar', 'Infraccion', inf._id, req.user, `${inf.numeroActa}: ${motivo}`);
   res.json({ ok: true });
 });

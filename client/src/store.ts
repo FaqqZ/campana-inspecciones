@@ -6,8 +6,10 @@ export interface Filtros {
   estadoInspeccion: string;
   geoEstado: string;
   conInfraccion: string;
+  conFotos: string;
+  notificado: string;
 }
-const VACIOS: Filtros = { calle: '', semaforo: '', estadoInspeccion: '', geoEstado: '', conInfraccion: '' };
+const VACIOS: Filtros = { calle: '', semaforo: '', estadoInspeccion: '', geoEstado: '', conInfraccion: '', conFotos: '', notificado: '' };
 
 interface Estado {
   filtros: Filtros;

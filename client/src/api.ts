@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { demoAdapter } from './demo';
 
 export type Rol = 'Administrador' | 'Tecnico' | 'Juridico' | 'Direccion' | 'MesaDeEntradas' | 'Consulta';
 export interface Usuario {
@@ -58,6 +59,27 @@ export interface Edificio {
   conclusionCruce?: string;
   mismaCalleOtraAltura?: boolean;
   enListadoSinCert?: boolean;
+  informe?: string;
+}
+export type EstadoPlazo = 'en_plazo' | 'por_vencer' | 'vencido' | 'presento' | 'acta' | 'sin_plazo';
+export interface Notificacion {
+  _id: string;
+  edificio?: { _id: string; direccionOriginal: string; calle: string } | string;
+  fechaNotificacion: string;
+  plazoDias: number | null;
+  fechaVencimiento: string | null;
+  observaciones: string;
+  boleta?: string;
+  razonSocial?: string;
+  inspector?: string;
+  plazoOriginal?: string;
+  vencimientoOriginal?: string | null;
+  prorroga?: boolean;
+  resultado?: '' | 'presento' | 'acta';
+  origen?: 'excel' | 'manual';
+  estadoPlazo: EstadoPlazo;
+  diasRestantes: number | null;
+  vigente?: boolean;
 }
 export interface PuntoMapa {
   id: string;
@@ -67,6 +89,8 @@ export interface PuntoMapa {
   semaforo: Semaforo;
   estadoInspeccion: EstadoInspeccion;
   geoEstado: GeoEstado;
+  fotos?: number;
+  plazo?: EstadoPlazo | null;
 }
 export interface DocumentoEdificio {
   presente: boolean;
@@ -139,6 +163,8 @@ export interface Ficha {
   infraccionesPotenciales: { documento: string; estado: EstadoDoc; motivo: { _id: string; nombre: string } }[];
   infracciones: Infraccion[];
   inspecciones: InspeccionVisita[];
+  fotos?: { _id: string; nombreOriginal: string; descripcion: string }[];
+  notificaciones?: Notificacion[];
 }
 
 const TOKEN_KEY = 'campana_token';
@@ -159,6 +185,7 @@ export const setToken = (t: string | null) => {
 };
 
 export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' });
+if (import.meta.env.VITE_SIN_LOGIN === 'true') api.defaults.adapter = demoAdapter; // demostración sin servidor
 api.interceptors.request.use((cfg) => {
   const t = getToken();
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
@@ -167,7 +194,7 @@ api.interceptors.request.use((cfg) => {
 api.interceptors.response.use(
   (r) => r,
   (e) => {
-    if (e.response?.status === 401 && !e.config.url?.includes('/auth/login')) {
+    if (e.response?.status === 401 && import.meta.env.VITE_SIN_LOGIN !== 'true' && !e.config.url?.includes('/auth/login')) {
       setToken(null);
       window.location.assign('/login');
     }

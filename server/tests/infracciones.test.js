@@ -90,3 +90,40 @@ test('kpis: totales, cobertura, antigüedad y agrupaciones', () => {
   assert.strictEqual(lunesDe(new Date('2026-09-02T12:00:00Z')), '2026-08-31');
   assert.deepStrictEqual(calcularKpis([]).porSemana, []);
 });
+
+test('kpis de edificios: certificado, final de obra de Catastro', () => {
+  const { calcularKpisEdificios, sinFinalDeObra } = require('../services/kpis');
+  const ed = (id, extra = {}) => ({ _id: id, calle: 'Mendoza', padron: 'P', estadoObra: '', conclusionCruce: '', geoEstado: 'ok', estadoInspeccion: 'pendiente', ...extra });
+  const edificios = [
+    ed('a', { estadoObra: 'CON PERMISO SIN FINAL A VERIFICAR CONSTRUCCION' }),
+    ed('b', { conclusionCruce: 'Tiene certificado ... pero figura SIN final de obra en CATASTRO.' }),
+    ed('c', { estadoObra: 'TERMINADO' }),
+    ed('d', { padron: '', geoEstado: 'fallido' }),
+  ];
+  assert.strictEqual(sinFinalDeObra(edificios[0]), true);
+  assert.strictEqual(sinFinalDeObra(edificios[2]), false);
+  const k = calcularKpisEdificios(edificios, {
+    conCertificado: new Set(['b']),
+    semaforos: new Map([['a', 'faltante'], ['b', 'vigente'], ['c', 'faltante'], ['d', 'sin_relevar']]),
+    actasAbiertas: new Map([['a', 2]]), actasTotales: new Map([['a', 2]]),
+  });
+  assert.strictEqual(k.resumen.total, 4);
+  assert.strictEqual(k.resumen.delCruce, 3);
+  assert.strictEqual(k.resumen.conCertificado, 1);
+  assert.strictEqual(k.resumen.sinFinalCatastro, 2);
+  assert.strictEqual(k.resumen.sinCertConActasAbiertas, 1);
+  assert.strictEqual(k.resumen.sinRelevar, 1);
+  assert.strictEqual(k.resumen.sinUbicar, 1);
+});
+
+test('situación según Catastro: denegada > conforme inconcluso > terminado y habitado', () => {
+  const { situacionCatastro, SITUACIONES } = require('../services/kpis');
+  const s = (estadoObra) => situacionCatastro({ estadoObra });
+  assert.equal(s('TERMINADO HABITADO CONFORME A OBRA DENEGADO'), SITUACIONES.denegada);
+  assert.equal(s('DENEGADO POR RES N° 007 DCyE DEL 12/01/2011 - TERMINADO HABITADO'), SITUACIONES.denegada);
+  assert.equal(s('CONFORME A OBRA INCONCLUSO'), SITUACIONES.conformeInconclusa);
+  assert.equal(s('TERMINADO HABITADO CONFORME A OBRA INCONCLUSO'), SITUACIONES.conformeInconclusa);
+  assert.equal(s('TERMINADO HABITADO'), SITUACIONES.terminado);
+  assert.equal(s('CON PERMISO SIN FINAL A VERIFICAR CONSTRUCCION'), SITUACIONES.otras);
+  assert.equal(s(''), SITUACIONES.sinDato);
+});

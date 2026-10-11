@@ -1,12 +1,15 @@
 const router = require('express').Router();
 const crypto = require('crypto');
 const multer = require('multer');
-const { Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
+const { Notificacion, FotoEdificio, Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
 const { generarPlantilla, leerHoja, leerCruce, leerActas, validarFilas } = require('../services/importador');
 const { TIPO_CERT, MOTIVO_CERT } = require('../services/catastro');
-const { campanaDe } = require('../services/edificios');
+const { campanaDe, sincronizarInspeccion } = require('../services/edificios');
 const { procesarPendientes } = require('../services/geocodificador');
+const { extraerGrupos, resolverGrupos } = require('../services/fotosWord');
+const fotosStore = require('../services/fotosStore');
+const { leerNotificados, validarNotificados } = require('../services/notificaciones');
 
 const MAX_FILAS = 2000;
 const upload = multer({
@@ -86,6 +89,212 @@ const resumir = (r) => ({
   avisos: r.avisos || [],
   unida: Boolean(r.unida),
   nuevos: r.nuevos,
+});
+
+// ---- Fotos de edificios desde un Word (.docx) ----
+const uploadWord = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 60 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => (/\.docx$/i.test(file.originalname) ? cb(null, true) : cb(new Error('Solo se aceptan archivos .docx'))),
+});
+const subirWord = (req, res, next) => uploadWord.single('archivo')(req, res, (err) => (err ? res.status(400).json({ message: err.message }) : next()));
+
+async function prepararFotos(req) {
+  if (!req.file) throw fallo('Adjuntá un archivo .docx');
+  const campana = await campanaDe(req);
+  if (!campana) throw fallo('No hay una campaña activa');
+  const edif = await Edificio.find({ campana }, 'direccionNorm calleNorm').lean();
+  const calles = new Map();
+  edif.forEach((e) => calles.set(e.calleNorm, (calles.get(e.calleNorm) || 0) + 1));
+  let extraido;
+  try {
+    extraido = await extraerGrupos(req.file.buffer, { callesConocidas: new Set(calles.keys()), permitirNuevas: req.body.crearEdificios === 'true' });
+  } catch (e) {
+    throw fallo(e.message);
+  }
+  if (!extraido.grupos.length) throw fallo('No se encontraron direcciones de edificios conocidos en el documento');
+  const resultado = resolverGrupos(extraido.grupos, {
+    edificios: new Map(edif.map((e) => [e.direccionNorm, String(e._id)])),
+    calles,
+    crearEdificios: req.body.crearEdificios === 'true',
+  });
+  return { campana, extraido, resultado };
+}
+
+router.post('/fotos/previsualizar', permitir('importar'), subirWord, async (req, res) => {
+  try {
+    const { extraido, resultado } = await prepararFotos(req);
+    const validas = resultado.filter((r) => !r.errores.length);
+    res.json({
+      total: resultado.length,
+      validas: validas.length,
+      conErrores: resultado.length - validas.length,
+      fotos: validas.reduce((a, r) => a + r.fotos.length, 0),
+      sinDireccion: extraido.sinDireccion,
+      ignoradas: extraido.ignoradas,
+      filas: resultado.map((r) => ({ fila: r.fila, direccion: `${r.direccion} · ${r.fotos.length} foto${r.fotos.length === 1 ? '' : 's'}`, errores: r.errores, avisos: r.avisos, unida: false, nuevos: { motivos: [] } })),
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
+});
+
+router.post('/fotos/confirmar', permitir('importar'), subirWord, async (req, res) => {
+  let prep;
+  try {
+    prep = await prepararFotos(req);
+  } catch (e) {
+    return res.status(e.status || 500).json({ message: e.message });
+  }
+  const { campana, resultado } = prep;
+  const validas = resultado.filter((r) => !r.errores.length);
+  if (!validas.length) return res.status(400).json({ message: 'No hay direcciones válidas para importar' });
+  const lote = crypto.randomUUID();
+
+  const crear = validas.filter((r) => r.crearEdificio);
+  const creados = crear.length
+    ? await Edificio.insertMany(crear.map((r) => ({ ...r.dir, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id })), { ordered: false })
+    : [];
+  creados.forEach((e) => { crear.find((r) => r.dir.direccionNorm === e.direccionNorm).edificio = String(e._id); });
+
+  let total = 0;
+  for (const r of validas) {
+    const existentes = await FotoEdificio.countDocuments({ edificio: r.edificio });
+    const docs = [];
+    for (const [i, f] of r.fotos.entries()) {
+      const archivo = await fotosStore.guardar(r.edificio, f.buffer, f.ext);
+      docs.push({ edificio: r.edificio, archivo, nombreOriginal: f.nombre, tipo: f.tipo, tamano: f.buffer.length, orden: existentes + i, lotImportacion: lote, creadoPor: req.user._id });
+    }
+    await FotoEdificio.insertMany(docs);
+    total += docs.length;
+    if (r.informe) await Edificio.updateOne({ _id: r.edificio }, { informe: r.informe, informeLote: lote });
+  }
+  audit('importar', 'FotoEdificio', lote, req.user, `${total} fotos en ${validas.length} edificios`);
+  if (creados.length) procesarPendientes({ campana });
+  res.status(201).json({ lote, importadas: total, edificios: validas.length, edificiosCreados: creados.length, omitidas: resultado.length - validas.length, geocodificando: creados.length > 0 });
+});
+
+router.delete('/fotos/lote/:lote', authorize(), async (req, res) => {
+  const fotos = await FotoEdificio.find({ lotImportacion: req.params.lote }).lean();
+  if (!fotos.length) return res.status(404).json({ message: 'Lote inexistente' });
+  for (const f of fotos) await fotosStore.borrar(f.edificio, f.archivo);
+  const r = await FotoEdificio.deleteMany({ lotImportacion: req.params.lote });
+  // edificios creados por este lote que quedaron sin datos
+  const nuevos = await Edificio.find({ lotImportacion: req.params.lote }, '_id').lean();
+  const ids = nuevos.map((e) => e._id);
+  const usados = new Set([
+    ...(await Infraccion.distinct('edificio', { edificio: { $in: ids } })).map(String),
+    ...(await FotoEdificio.distinct('edificio', { edificio: { $in: ids } })).map(String),
+  ]);
+  await Edificio.updateMany({ informeLote: req.params.lote }, { informe: '', informeLote: '' });
+  const e = await Edificio.deleteMany({ _id: { $in: ids.filter((id) => !usados.has(String(id))) }, lotImportacion: req.params.lote });
+  audit('revertir-lote', 'FotoEdificio', req.params.lote, req.user, `${r.deletedCount} fotos, ${e.deletedCount} edificios`);
+  res.json({ eliminadas: r.deletedCount, edificiosEliminados: e.deletedCount });
+});
+
+// ---- Edificios notificados (Excel con domicilio, fecha de notificación y plazo en días) ----
+async function prepararNotificados(req) {
+  if (!req.file) throw fallo('Adjuntá un archivo .xlsx');
+  const campana = await campanaDe(req);
+  if (!campana) throw fallo('No hay una campaña activa');
+  let filas;
+  try {
+    filas = leerNotificados(req.file.buffer);
+  } catch (e) {
+    throw fallo(/listado de notificados/i.test(e.message) ? e.message : 'No se pudo leer el archivo Excel');
+  }
+  if (!filas.length) throw fallo('El archivo no tiene filas de datos');
+  if (filas.length > MAX_FILAS) throw fallo(`El archivo supera el máximo de ${MAX_FILAS} filas`);
+  const edif = await Edificio.find({ campana }, 'direccionNorm calleNorm').lean();
+  const calles = new Map();
+  edif.forEach((e) => calles.set(e.calleNorm, (calles.get(e.calleNorm) || 0) + 1));
+  const previas = await Notificacion.find({ edificio: { $in: edif.map((e) => e._id) } }, 'edificio fechaNotificacion fechaVencimiento').lean();
+  const ctx = {
+    edificios: new Map(edif.map((e) => [e.direccionNorm, String(e._id)])),
+    calles,
+    crearEdificios: req.body.crearEdificios === 'true',
+    existentes: new Map(previas.map((n) => [`${n.edificio}|${n.fechaNotificacion.toISOString().slice(0, 10)}`, { id: String(n._id), tienePlazo: Boolean(n.fechaVencimiento) }])),
+  };
+  return { campana, resultado: validarNotificados(filas, ctx) };
+}
+
+router.post('/notificados/previsualizar', permitir('importar'), subir, async (req, res) => {
+  try {
+    const { resultado } = await prepararNotificados(req);
+    const validas = resultado.filter((r) => !r.errores.length).length;
+    const unidas = resultado.filter((r) => r.unida).length;
+    res.json({
+      total: resultado.length,
+      validas,
+      conErrores: resultado.length - validas,
+      unidas,
+      conAvisos: resultado.filter((r) => r.avisos?.length && !r.unida).length,
+      filas: resultado.map((r) => ({
+        fila: r.fila,
+        direccion: r.data ? `${r.data.direccionOriginal} · ${r.data.plazoDias ? `${r.data.plazoDias} días` : 'sin plazo'}` : '',
+        errores: r.errores, avisos: r.avisos || [], unida: Boolean(r.unida), nuevos: { motivos: [] },
+      })),
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
+});
+
+router.post('/notificados/confirmar', permitir('importar'), subir, async (req, res) => {
+  let prep;
+  try {
+    prep = await prepararNotificados(req);
+  } catch (e) {
+    return res.status(e.status || 500).json({ message: e.message });
+  }
+  const { campana, resultado } = prep;
+  const validas = resultado.filter((r) => !r.errores.length && !r.unida);
+  if (!validas.length) return res.status(400).json({ message: 'No hay filas válidas para importar' });
+  const lote = crypto.randomUUID();
+
+  // Edificios que no estaban en la base: se crean una sola vez por dirección y quedan pendientes de ubicar en el mapa.
+  const porDireccion = new Map();
+  validas.filter((r) => r.data.crearEdificio).forEach((r) => porDireccion.set(r.data.dir.direccionNorm, r.data.dir));
+  const creados = porDireccion.size
+    ? await Edificio.insertMany([...porDireccion.values()].map((dir) => ({ ...dir, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id })), { ordered: false })
+    : [];
+  const idNuevo = new Map(creados.map((e) => [e.direccionNorm, String(e._id)]));
+  validas.forEach((r) => { if (r.data.crearEdificio) r.data.edificio = idNuevo.get(r.data.dir.direccionNorm); });
+
+  const campos = (r) => ({
+    fechaNotificacion: r.data.fechaNotificacion, plazoDias: r.data.plazoDias, fechaVencimiento: r.data.fechaVencimiento, observaciones: r.data.observaciones,
+    boleta: r.data.boleta, razonSocial: r.data.razonSocial, inspector: r.data.inspector, plazoOriginal: r.data.plazoOriginal,
+    vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado,
+  });
+  const completar = validas.filter((r) => r.data.actualiza);
+  for (const r of completar) await Notificacion.updateOne({ _id: r.data.actualiza }, campos(r));
+  await Notificacion.insertMany(validas.filter((r) => !r.data.actualiza).map((r) => ({
+    edificio: r.data.edificio, fechaNotificacion: r.data.fechaNotificacion, plazoDias: r.data.plazoDias,
+    fechaVencimiento: r.data.fechaVencimiento, observaciones: r.data.observaciones,
+    boleta: r.data.boleta, razonSocial: r.data.razonSocial, inspector: r.data.inspector, plazoOriginal: r.data.plazoOriginal,
+    vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id,
+  })), { ordered: false });
+  audit('importar', 'Notificacion', lote, req.user, `${validas.length} notificaciones, ${creados.length} edificios nuevos`);
+  if (creados.length) procesarPendientes({ campana });
+  res.status(201).json({
+    lote, importadas: validas.length - completar.length, completadas: completar.length, edificiosCreados: creados.length,
+    unidas: resultado.filter((r) => r.unida).length, omitidas: resultado.filter((r) => r.errores.length).length, geocodificando: creados.length > 0,
+  });
+});
+
+router.delete('/notificados/lote/:lote', authorize(), async (req, res) => {
+  const r = await Notificacion.deleteMany({ lotImportacion: req.params.lote });
+  if (!r.deletedCount) return res.status(404).json({ message: 'Lote inexistente' });
+  // edificios creados por este lote que no tienen otros datos
+  const ids = (await Edificio.find({ lotImportacion: req.params.lote }, '_id').lean()).map((e) => e._id);
+  const usados = new Set([
+    ...(await Infraccion.distinct('edificio', { edificio: { $in: ids } })).map(String),
+    ...(await Notificacion.distinct('edificio', { edificio: { $in: ids } })).map(String),
+    ...(await FotoEdificio.distinct('edificio', { edificio: { $in: ids } })).map(String),
+  ]);
+  const e = await Edificio.deleteMany({ _id: { $in: ids.filter((id) => !usados.has(String(id))) }, lotImportacion: req.params.lote });
+  audit('revertir-lote', 'Notificacion', req.params.lote, req.user, `${r.deletedCount} notificaciones, ${e.deletedCount} edificios`);
+  res.json({ eliminadas: r.deletedCount, edificiosEliminados: e.deletedCount });
 });
 
 router.post('/:tipo/previsualizar', tipoValido, permitir('importar'), subir, async (req, res) => {
@@ -224,6 +433,7 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
     };
   });
   await Infraccion.insertMany(docs, { ordered: false });
+  await sincronizarInspeccion(docs.map((d) => d.edificio));
   audit('importar', 'Infraccion', lote, req.user, `${docs.length} infracciones, ${creados.length} edificios nuevos`);
   if (creados.length) procesarPendientes({ campana });
   res.status(201).json({ lote, importadas: docs.length, edificiosCreados: creados.length, unidas, omitidas: resultado.length - docs.length - unidas, geocodificando: creados.length > 0 });
@@ -242,6 +452,7 @@ router.delete('/:tipo/lote/:lote', tipoValido, authorize(), async (req, res) => 
     const usados = await Infraccion.distinct('edificio', { edificio: { $in: ids } });
     const libres = ids.filter((id) => !usados.some((u) => String(u) === String(id)));
     const e = await Edificio.deleteMany({ _id: { $in: libres }, lotImportacion: lote });
+    await sincronizarInspeccion();
     audit('revertir-lote', 'Infraccion', lote, req.user, `${r.deletedCount} infracciones, ${e.deletedCount} edificios`);
     return res.json({ eliminadas: r.deletedCount, edificiosEliminados: e.deletedCount });
   }

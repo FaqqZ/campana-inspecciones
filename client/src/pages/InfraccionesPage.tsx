@@ -98,7 +98,7 @@ export default function InfraccionesPage() {
 
         <Paper sx={{ p: 2 }}>
           <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 2 }}>
-            <TextField size="small" label="Buscar (acta, infractor, dirección)" sx={{ minWidth: 280, flex: 1 }} value={filtros.search} onChange={(e) => cambiar('search', e.target.value)} />
+            <TextField size="small" label="Buscar (acta, infractor, dirección)" sx={{ minWidth: { xs: 0, sm: 280 }, flex: 1 }} value={filtros.search} onChange={(e) => cambiar('search', e.target.value)} />
             <TextField select size="small" label="Estado" sx={{ minWidth: 170 }} value={filtros.estado} onChange={(e) => cambiar('estado', e.target.value)}>
               <MenuItem value="">Todos</MenuItem>{estados.map((x) => <MenuItem key={x._id} value={x._id}>{x.nombre}</MenuItem>)}
             </TextField>
@@ -126,7 +126,7 @@ export default function InfraccionesPage() {
         </Paper>
 
         <Paper sx={{ p: 1, overflow: 'auto' }}>
-          <Table size="small">
+          <Box sx={{ overflowX: 'auto' }}><Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>N° acta</TableCell><TableCell>Edificio</TableCell><TableCell>Infractor</TableCell><TableCell>Inspectores</TableCell>
@@ -160,7 +160,7 @@ export default function InfraccionesPage() {
               ))}
               {!items.length && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 5, color: 'text.secondary' }}>No hay infracciones con esos filtros.</TableCell></TableRow>}
             </TableBody>
-          </Table>
+          </Table></Box>
           {total > LIMITE && <Box sx={{ p: 1 }}><Pagination count={Math.ceil(total / LIMITE)} page={page} onChange={(_, p) => setPage(p)} /></Box>}
         </Paper>
       </Stack>

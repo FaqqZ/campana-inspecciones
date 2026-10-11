@@ -6,13 +6,13 @@ import 'leaflet/dist/leaflet.css';
 import 'react-leaflet-cluster/lib/assets/MarkerCluster.css';
 import 'react-leaflet-cluster/lib/assets/MarkerCluster.Default.css';
 import { PuntoMapa } from '../api';
-import { SEMAFORO } from '../semaforo';
+import { PLAZO, SEMAFORO } from '../semaforo';
 
 const CENTRO: [number, number] = [-26.8241, -65.2226]; // San Miguel de Tucumán
 
 const iconos = new Map<string, L.DivIcon>();
-function icono(color: string, grande: boolean) {
-  const k = `${color}-${grande}`;
+function icono(color: string, grande: boolean, aro = '') {
+  const k = `${color}-${grande}-${aro}`;
   let i = iconos.get(k);
   if (!i) {
     const t = grande ? 26 : 16;
@@ -20,7 +20,7 @@ function icono(color: string, grande: boolean) {
       className: '',
       iconSize: [t, t],
       iconAnchor: [t / 2, t / 2],
-      html: `<div style="width:${t}px;height:${t}px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.35)"></div>`,
+      html: `<div style="width:${t}px;height:${t}px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:${aro ? `0 0 0 3px ${aro}, ` : ''}0 0 0 1px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.35)"></div>`,
     });
     iconos.set(k, i);
   }
@@ -81,11 +81,13 @@ export default function MapaView({ puntos, claveFiltros, seleccionado, moviendo,
       <ClickParaUbicar activo={moviendo} onPick={onMover} />
       <MarkerClusterGroup chunkedLoading maxClusterRadius={45}>
         {normales.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={icono(SEMAFORO[p.semaforo].color, false)} eventHandlers={{ click: () => onSelect(p.id) }}>
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={icono(SEMAFORO[p.semaforo].color, false, p.plazo ? PLAZO[p.plazo].color : '')} eventHandlers={{ click: () => onSelect(p.id) }}>
             <Tooltip direction="top" offset={[0, -8]}>
               <strong>{p.direccion}</strong>
               <br />
               {SEMAFORO[p.semaforo].label}
+              {p.plazo && <><br />⏱ Notificado: {PLAZO[p.plazo].label}</>}
+              {!!p.fotos && <><br />📷 {p.fotos} foto{p.fotos === 1 ? '' : 's'}</>}
             </Tooltip>
           </Marker>
         ))}

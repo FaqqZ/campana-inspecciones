@@ -75,4 +75,70 @@ function calcularKpis(infracciones, { totalEdificios = 0, hoy = new Date() } = {
   };
 }
 
-module.exports = { calcularKpis, lunesDe };
+const quitarTildes = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/** Final de obra faltante según Catastro: el estado de obra o la conclusión del cruce lo dicen. */
+const sinFinalDeObra = (e) => /sin final/i.test(quitarTildes(e.estadoObra)) || /sin final de obra/i.test(quitarTildes(e.conclusionCruce));
+
+/**
+ * Situación del edificio según el estado de obra de Catastro (excluyente, en este orden de prioridad):
+ * resolución denegada > presentó conforme a obra sin terminar la documentación > terminado y habitado > otras.
+ */
+const SITUACIONES = {
+  denegada: 'Resolución denegada',
+  conformeInconclusa: 'Conforme a obra presentado, documentación sin terminar',
+  terminado: 'Terminado y habitado',
+  otras: 'Otras situaciones (sin final, a verificar, en construcción…)',
+  sinDato: 'Sin dato de Catastro',
+};
+function situacionCatastro(e) {
+  const t = quitarTildes(e.estadoObra).toLowerCase();
+  if (!t.trim()) return SITUACIONES.sinDato;
+  if (/denegad/.test(t)) return SITUACIONES.denegada;
+  if (/conforme a obra/.test(t) && /inconclu/.test(t)) return SITUACIONES.conformeInconclusa;
+  if (/terminad/.test(t)) return SITUACIONES.terminado;
+  return SITUACIONES.otras;
+}
+
+/**
+ * Indicadores de los edificios y del cruce Catastro / Defensa Civil (no dependen del período de las infracciones).
+ * edificios: [{ _id, calle, padron, estadoObra, conclusionCruce, enListadoSinCert, mismaCalleOtraAltura, geoEstado, estadoInspeccion }]
+ * ctx: { conCertificado:Set(id), semaforos:Map(id->semaforo), actasAbiertas:Map(id->cantidad), actasTotales:Map(id->cantidad) }
+ */
+function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforos = new Map(), actasAbiertas = new Map(), actasTotales = new Map() } = {}) {
+  const total = edificios.length;
+  const id = (e) => String(e._id);
+  const cert = (e) => conCertificado.has(id(e));
+  const delCruce = edificios.filter((e) => e.padron);
+  const sinFinal = edificios.filter(sinFinalDeObra);
+  const pct = (n, d = total) => (d ? Math.round((n / d) * 100) : 0);
+  const sinCert = edificios.filter((e) => !cert(e) && (semaforos.get(id(e)) || '') !== 'sin_relevar');
+  return {
+    resumen: {
+      total,
+      delCruce: delCruce.length,
+      creadosDesdeActas: total - delCruce.length,
+      conCertificado: edificios.filter(cert).length,
+      pctCertificado: pct(edificios.filter(cert).length),
+      sinCertificado: sinCert.length,
+      sinRelevar: edificios.filter((e) => (semaforos.get(id(e)) || '') === 'sin_relevar').length,
+      sinFinalCatastro: sinFinal.length,
+      pctSinFinalCatastro: pct(sinFinal.length),
+      sinCertConActasAbiertas: sinCert.filter((e) => (actasAbiertas.get(id(e)) || 0) > 0).length,
+      sinCertSinActas: sinCert.filter((e) => !(actasTotales.get(id(e)) || 0)).length,
+      conActas: edificios.filter((e) => (actasTotales.get(id(e)) || 0) > 0).length,
+      sinUbicar: edificios.filter((e) => e.geoEstado === 'fallido' || e.geoEstado === 'pendiente').length,
+    },
+    porSituacion: Object.values(SITUACIONES).map((nombre) => {
+      const del = edificios.filter((e) => situacionCatastro(e) === nombre);
+      return { nombre, cantidad: del.length };
+    }),
+    porEstadoObra: contar(edificios, (e) => (e.estadoObra ? e.estadoObra.replace(/\s+/g, ' ').trim() : 'Sin dato de Catastro'), 10),
+    porSemaforo: contar(edificios, (e) => ({ vigente: 'Al día', por_vencer: 'Por vencer', vencido: 'Vencido', faltante: 'Falta certificado', sin_relevar: 'Sin relevar' })[semaforos.get(id(e))] || 'Sin relevar'),
+    porInspeccion: contar(edificios, (e) => ({ pendiente: 'Pendiente', inspeccionado: 'Inspeccionado', observado: 'Observado', regularizado: 'Regularizado' })[e.estadoInspeccion] || e.estadoInspeccion),
+    porGeo: contar(edificios, (e) => ({ ok: 'Ubicado', aproximado: 'Aproximado', manual: 'Manual', pendiente: 'Pendiente', fallido: 'No se pudo ubicar' })[e.geoEstado] || e.geoEstado),
+    sinCertPorCalle: contar(sinCert, (e) => e.calle, 8),
+  };
+}
+
+module.exports = { calcularKpis, calcularKpisEdificios, sinFinalDeObra, situacionCatastro, SITUACIONES, lunesDe };
