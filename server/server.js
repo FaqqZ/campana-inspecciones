@@ -20,11 +20,16 @@ app.get('/api/health', (req, res) => {
   const ok = mongoose.connection.readyState === 1;
   res.status(ok ? 200 : 503).json({ ok });
 });
+// INSECURE_HTTP=true: acceso por HTTP plano (red interna, sin proxy con HTTPS). Sin esto helmet obliga a cargar los
+// recursos por HTTPS y HSTS fija HTTPS en el navegador, y la página no abre en una IP que no sea localhost.
+const sinHttps = process.env.INSECURE_HTTP === 'true';
 app.use(
   helmet({
+    hsts: !sinHttps,
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        ...(sinHttps && { 'upgrade-insecure-requests': null }),
         'img-src': ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org'], // blob: para las fotos de los edificios (se piden con sesión)
       },
     },

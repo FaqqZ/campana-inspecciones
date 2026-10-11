@@ -4,7 +4,30 @@ Seguimiento de una campaña de inspecciones sobre un relevamiento de edificios: 
 ubicación automática en el mapa (OpenStreetMap), filtro por calle, estado documental con vencimientos,
 actas/expedientes vinculados e infracciones potenciales.
 
-## Puesta en marcha
+## Instalación en cualquier PC (Docker)
+Requiere solo [Docker](https://www.docker.com/products/docker-desktop/) (Windows, macOS o Linux). No hace falta instalar Node ni MongoDB.
+
+```bash
+git clone https://github.com/FaqqZ/campana-inspecciones.git && cd campana-inspecciones
+docker compose up -d --build        # la primera vez tarda unos minutos
+docker compose logs app | grep -i contraseña   # usuario "admin" y su contraseña generada (solo en el primer arranque)
+```
+Abrir **http://localhost:5003** (o `http://<ip-de-la-pc>:5003` desde otra máquina de la red; abrir ese puerto en el firewall).
+Todo tiene valores por defecto; para cambiarlos (puerto, contraseña del admin, contacto de Nominatim) copiar `.env.example` a `.env`.
+
+**Llevar los datos de otra instalación** (base + fotos):
+```bash
+# en la máquina que tiene los datos (Mac/Linux, con mongodump)
+deploy/exportar-datos.sh               # genera ~/campana-respaldo/campana-datos-<fecha>.tar.gz
+# en la PC nueva, con la aplicación levantada
+deploy/importar-datos.sh campana-datos-<fecha>.tar.gz
+```
+En Windows, desde Git Bash o WSL funcionan los mismos scripts. El archivo exportado trae datos reales: no se sube a git ni se comparte por canales abiertos.
+
+Comandos útiles: `docker compose ps` (estado), `docker compose logs -f app`, `docker compose down` (apaga; los datos quedan en volúmenes), `git pull && docker compose up -d --build` (actualiza).
+Por HTTP plano, usuario y contraseña viajan sin cifrar: usarlo solo en red interna, o poner HTTPS (`deploy/Caddyfile`, con `INSECURE_HTTP=false` y `TRUST_PROXY=1`).
+
+## Puesta en marcha (sin Docker)
 1. MongoDB corriendo. `cd server && cp .env.example .env` y definí `JWT_SECRET` (32+ caracteres), `ADMIN_PASSWORD`
    y **`GEO_USER_AGENT` con un contacto real** (lo exige la política de uso de Nominatim).
 2. `npm install && npm run seed && npm run dev` (API en :5003).

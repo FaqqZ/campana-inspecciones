@@ -1,0 +1,39 @@
+# Levanta la aplicación y MongoDB en cualquier PC con Docker:  docker compose up -d --build
+# Luego abrir http://localhost:5003. Configuración opcional en un archivo .env (ver .env.example).
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - mongo-datos:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${PORT:-5003}:5003"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/campana-inspecciones
+      PORT: "5003"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      GEO_USER_AGENT: "${GEO_USER_AGENT:-campana-inspecciones/1.0 (contacto: definir-en-.env)}"
+      GEO_VIEWBOX: "${GEO_VIEWBOX:--65.33,-26.75,-65.12,-26.93}"
+      # true = acceso por HTTP plano (red interna). Con HTTPS delante (Caddy/Nginx) poner false y TRUST_PROXY=1.
+      INSECURE_HTTP: "${INSECURE_HTTP:-true}"
+      TRUST_PROXY: "${TRUST_PROXY:-}"
+    volumes:
+      - fotos:/app/server/uploads
+
+volumes:
+  mongo-datos:
+  fotos:
