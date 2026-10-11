@@ -4,7 +4,7 @@ import {
   Alert, Autocomplete, Box, Button, Chip, Divider, MenuItem, Paper, Snackbar, Stack, TextField, Typography,
 } from '@mui/material';
 import { api, errMsg, PuntoMapa } from '../api';
-import { INSPECCION_LABEL, PLAZO, SEMAFORO } from '../semaforo';
+import { PLAZO, SEMAFORO } from '../semaforo';
 import { useMapa } from '../store';
 import MapaView from '../components/MapaView';
 import FichaEdificio from '../components/FichaEdificio';
@@ -108,11 +108,7 @@ export default function MapaPage() {
           />
           <TextField select size="small" label="Documentación" value={filtros.semaforo} onChange={(e) => setFiltro('semaforo', e.target.value)}>
             <MenuItem value="">Todas</MenuItem>
-            {Object.entries(SEMAFORO).map(([k, v]) => <MenuItem key={k} value={k}>{v.label}</MenuItem>)}
-          </TextField>
-          <TextField select size="small" label="Inspección" value={filtros.estadoInspeccion} onChange={(e) => setFiltro('estadoInspeccion', e.target.value)}>
-            <MenuItem value="">Todas</MenuItem>
-            {Object.entries(INSPECCION_LABEL).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
+            {Object.entries(SEMAFORO).filter(([k]) => k !== 'por_vencer' && k !== 'vencido').map(([k, v]) => <MenuItem key={k} value={k}>{v.label}</MenuItem>)}
           </TextField>
           <TextField select size="small" label="Infracciones" value={filtros.conInfraccion} onChange={(e) => setFiltro('conInfraccion', e.target.value)}>
             <MenuItem value="">Todos los edificios</MenuItem>

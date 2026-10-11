@@ -3,13 +3,12 @@ import { create } from 'zustand';
 export interface Filtros {
   calle: string;
   semaforo: string;
-  estadoInspeccion: string;
   geoEstado: string;
   conInfraccion: string;
   conFotos: string;
   notificado: string;
 }
-const VACIOS: Filtros = { calle: '', semaforo: '', estadoInspeccion: '', geoEstado: '', conInfraccion: '', conFotos: '', notificado: '' };
+const VACIOS: Filtros = { calle: '', semaforo: '', geoEstado: '', conInfraccion: '', conFotos: '', notificado: '' };
 
 interface Estado {
   filtros: Filtros;
