@@ -48,7 +48,7 @@ test('filasDelCruce ubica los encabezados y descarta resumen y notas', () => {
   assert.strictEqual(filasDelCruce([['nada']]), null);
 });
 
-test('cruce: edificio, certificado, repetidas unidas y existentes', () => {
+test('cruce: edificio, certificado, repetidas unidas y existentes se actualizan', () => {
   const m = [ENC,
     fila(1, '100', 'BOLIVAR SIMON', 958, 'A', ['SÍ', '225/23', '100797/23', '2023', 'NO']),
     fila(2, '200', 'BOLIVAR, SIMON', '958', 'B'),
@@ -63,5 +63,36 @@ test('cruce: edificio, certificado, repetidas unidas y existentes', () => {
   assert.strictEqual(r[0].data.titular, 'A // B');
   assert.strictEqual(r[1].unida, true);
   assert.ok(r[2].errores[0].includes('Altura sin número'));
-  assert.ok(r[3].errores[0].includes('ya existe'));
+  assert.deepStrictEqual(r[3].errores, []);
+  assert.strictEqual(r[3].data.actualiza, true);
 });
+
+const existente = (extra = {}) => ({ _id: 'e1', padron: '400', estadoObra: 'TERMINADO', titular: 'D', calleOrigen: 'SALTA PROVINCIA DE', alturaOriginal: '10', esquina: '', conclusionCruce: 'conclusión', mismaCalleOtraAltura: false, enListadoSinCert: false, certificado: null, ...extra });
+const cruceExistente = (filas, actual) => validarFilas('cruce', filasDelCruce([ENC, ...filas]), { existentes: new Map([['salta 10', actual]]) });
+
+test('cruce: un edificio existente se actualiza y detecta qué cambia', () => {
+  const [r] = cruceExistente([fila(1, '999', 'SALTA PROVINCIA DE', 10, 'D', ['SÍ', '5/24', '1', '2024', 'NO'])], existente());
+  assert.strictEqual(r.data.actualiza, 'e1');
+  assert.deepStrictEqual(r.errores, []);
+  assert.ok(r.cambios.includes('Padrón'));
+  assert.ok(r.cambios.includes('Certificado final'));
+  assert.ok(!r.cambios.includes('Titular'));
+});
+
+test('cruce: un edificio existente con los mismos datos queda sin cambios', () => {
+  const [r] = cruceExistente([fila(1, '400', 'SALTA PROVINCIA DE', 10, 'D')], existente({ certificado: { presente: false, nroReferencia: '' } }));
+  assert.deepStrictEqual(r.cambios, []);
+});
+
+test('cruce: lo vacío del archivo no pisa lo ya cargado', () => {
+  const [r] = cruceExistente([fila(1, '', 'SALTA PROVINCIA DE', 10, '')], existente());
+  assert.ok(!r.cambios.includes('Padrón'));
+  assert.ok(!r.cambios.includes('Titular'));
+});
+
+test('cruce: la misma dirección repetida en el archivo se une también si el edificio ya existe', () => {
+  const r = cruceExistente([fila(1, '1', 'SALTA PROVINCIA DE', 10, 'D'), fila(2, '2', 'SALTA PROVINCIA DE', 10, 'E')], existente());
+  assert.strictEqual(r[1].unida, true);
+  assert.strictEqual(r[0].data.padron, '1 / 2');
+});
+

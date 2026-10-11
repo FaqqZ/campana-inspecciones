@@ -156,25 +156,58 @@ function validarCruce(filas, ctx) {
       },
     };
 
-    if (alt.numero) {
-      if (ctx.existentes.has(direccionNorm)) errores.push(`${direccionOriginal} ya existe en la campaña`);
-      else if (vistos.has(direccionNorm)) {
-        const base = vistos.get(direccionNorm);
-        if (!errores.length) {
-          // misma dirección: se suma al edificio ya leído (otro padrón o propietario)
-          if (data.padron && !base.data.padron.split(' / ').includes(data.padron)) base.data.padron += ` / ${data.padron}`;
-          if (data.titular && !base.data.titular.split(' // ').includes(data.titular)) base.data.titular += ` // ${data.titular}`;
-          base.avisos.push(`Se unió la fila ${fila} (mismo edificio, padrón ${data.padron || '—'})`);
-          resultados.push({ fila, data: null, errores: [], avisos: [`Unida con la fila ${base.fila}: es la misma dirección`], nuevos, unida: true });
-          return;
-        }
-      }
+    // Qué columnas vinieron con valor: las vacías no pisan lo que ya está cargado al actualizar.
+    data.presentes = {
+      mismaCalle: limpiar(raw.mismaCalle) !== '',
+      enListado: limpiar(raw.enListadoSinCert) !== '',
+      cert: limpiar(raw.tieneCert) !== '' || data.cert.numero !== '' || data.cert.expediente !== '' || data.cert.anio !== '',
+      certTiene: limpiar(raw.tieneCert) !== '',
+    };
+
+    if (alt.numero && vistos.has(direccionNorm) && !errores.length) {
+      const base = vistos.get(direccionNorm);
+      // misma dirección: se suma al edificio ya leído (otro padrón o propietario)
+      if (data.padron && !base.data.padron.split(' / ').includes(data.padron)) base.data.padron += ` / ${data.padron}`;
+      if (data.titular && !base.data.titular.split(' // ').includes(data.titular)) base.data.titular += ` // ${data.titular}`;
+      base.avisos.push(`Se unió la fila ${fila} (mismo edificio, padrón ${data.padron || '—'})`);
+      resultados.push({ fila, data: null, errores: [], avisos: [`Unida con la fila ${base.fila}: es la misma dirección`], nuevos, unida: true });
+      return;
     }
     const r = { fila, data, errores, avisos, nuevos };
     if (alt.numero && !errores.length) vistos.set(direccionNorm, r);
     resultados.push(r);
   });
+  // Direcciones que ya están en la campaña: se actualizan los datos de Catastro (no se rechazan).
+  resultados.forEach((r) => {
+    if (!r.data || r.errores.length || !ctx.existentes.has(r.data.direccionNorm)) return;
+    const actual = ctx.existentes.get?.(r.data.direccionNorm) || null; // con un Set solo se sabe que existe
+    r.data.actualiza = actual ? actual._id : true;
+    r.cambios = actual ? diferenciasCatastro(actual, r.data) : [];
+  });
   return resultados;
+}
+
+const CAMPOS_TEXTO_CATASTRO = [
+  ['padron', 'Padrón'], ['estadoObra', 'Estado de obra'], ['titular', 'Titular'], ['calleOrigen', 'Calle (Catastro)'],
+  ['alturaOriginal', 'Altura (Catastro)'], ['esquina', 'Esquina'], ['conclusionCruce', 'Conclusión'],
+];
+
+/** ¿El certificado queda presente? Si el archivo no dice "tiene", se conserva lo cargado (o se infiere del N° de certificado). */
+function presenteCert(data, doc) {
+  if (data.presentes.certTiene) return data.cert.tiene;
+  return data.cert.numero ? true : Boolean(doc?.presente);
+}
+
+/** Campos de catastro que se pisarían en un edificio existente (los vacíos del archivo no cuentan). */
+function diferenciasCatastro(actual, data) {
+  const dif = CAMPOS_TEXTO_CATASTRO.filter(([k]) => data[k] && data[k] !== (actual[k] || '')).map(([, etiqueta]) => etiqueta);
+  if (data.presentes.mismaCalle && data.mismaCalleOtraAltura !== Boolean(actual.mismaCalleOtraAltura)) dif.push('Misma calle con certificado');
+  if (data.presentes.enListado && data.enListadoSinCert !== Boolean(actual.enListadoSinCert)) dif.push('En listado sin certificado');
+  if (data.presentes.cert) {
+    const d = actual.certificado;
+    if (!d || d.presente !== presenteCert(data, d) || (data.cert.numero && data.cert.numero !== (d.nroReferencia || ''))) dif.push('Certificado final');
+  }
+  return dif;
 }
 
 /**
@@ -378,4 +411,4 @@ function validarFilas(tipo, filas, ctx) {
   });
 }
 
-module.exports = { COLUMNAS, parseFecha, splitLista, leerHoja, leerCruce, leerActas: actas.leerActas, generarPlantilla, validarFilas };
+module.exports = { CAMPOS_TEXTO_CATASTRO, diferenciasCatastro, presenteCert, COLUMNAS, parseFecha, splitLista, leerHoja, leerCruce, leerActas: actas.leerActas, generarPlantilla, validarFilas };

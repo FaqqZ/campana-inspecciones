@@ -8,8 +8,8 @@ import { useAuth } from '../auth';
 
 type Tipo = 'edificios' | 'infracciones' | 'cruce' | 'actas' | 'fotos' | 'notificados';
 const esInfra = (t: Tipo) => t === 'infracciones' || t === 'actas';
-interface FilaPrev { fila: number; direccion: string; errores: string[]; avisos: string[]; unida: boolean; nuevos: { motivos: string[] } }
-interface Prev { total: number; validas: number; conErrores: number; unidas?: number; conAvisos?: number; certificados?: number; fotos?: number; sinDireccion?: number; ignoradas?: number; filas: FilaPrev[] }
+interface FilaPrev { fila: number; direccion: string; errores: string[]; avisos: string[]; unida: boolean; nuevos: { motivos: string[] }; cambios?: string[]; actualiza?: boolean }
+interface Prev { total: number; validas: number; conErrores: number; unidas?: number; conAvisos?: number; certificados?: number; nuevas?: number; aActualizar?: number; sinCambios?: number; fotos?: number; sinDireccion?: number; ignoradas?: number; filas: FilaPrev[] }
 interface Progreso { corriendo: boolean; pendientes: number; porEstado: Record<string, number>; ultimoError: string }
 
 export default function ImportarPage() {
@@ -66,8 +66,8 @@ export default function ImportarPage() {
     setBusy(true); setError('');
     try {
       const r = await api.post(`/importar/${tipo}/confirmar`, form());
-      setLote({ id: r.data.lote, tipo, importadas: r.data.importadas });
-      const extra = [r.data.unidas ? `${r.data.unidas} repetidas unidas` : '', r.data.conCertificado !== undefined ? `${r.data.conCertificado} con certificado final` : '', r.data.edificiosCreados ? `${r.data.edificiosCreados} edificios nuevos` : '', r.data.omitidas ? `${r.data.omitidas} omitidas por errores` : ''].filter(Boolean).join(', ');
+      setLote({ id: r.data.lote, tipo, importadas: r.data.importadas + (r.data.actualizadas ?? 0) });
+      const extra = [r.data.actualizadas ? `${r.data.actualizadas} actualizados` : '', r.data.sinCambios ? `${r.data.sinCambios} ya estaban al día` : '', r.data.unidas ? `${r.data.unidas} repetidas unidas` : '', r.data.conCertificado !== undefined ? `${r.data.conCertificado} con certificado final` : '', r.data.edificiosCreados ? `${r.data.edificiosCreados} edificios nuevos` : '', r.data.omitidas ? `${r.data.omitidas} omitidas por errores` : ''].filter(Boolean).join(', ');
       setMsg(`Se importaron ${r.data.importadas} ${tipo === 'fotos' ? 'fotos' : tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : 'edificios'}${extra ? ` (${extra})` : ''}.`);
       setPrev(null); setArchivo(null);
       if (input.current) input.current.value = '';
@@ -79,7 +79,7 @@ export default function ImportarPage() {
     if (!lote || !window.confirm(`¿Revertir la importación de ${lote.importadas} filas?`)) return;
     try {
       const r = await api.delete(`/importar/${lote.tipo}/lote/${lote.id}`);
-      setMsg(`Importación revertida (${r.data.eliminadas} eliminadas).`);
+      setMsg(`Importación revertida (${r.data.eliminadas} eliminadas${r.data.restauradas ? `, ${r.data.restauradas} restaurados a su estado anterior` : ''}).`);
       setLote(null);
     } catch (e) { setError(errMsg(e)); }
   };
@@ -105,7 +105,7 @@ export default function ImportarPage() {
           {tipo === 'fotos' && 'Subí un Word (.docx) con las direcciones de los edificios y las fotos debajo de cada una. Cada foto se asocia al edificio de esa dirección y se ve en la pestaña Fotos de su ficha en el mapa, junto con lo que informa Catastro sobre el final de obra.'}
           {tipo === 'actas' && 'Subí el listado de actas de infracción tal cual (Fecha, Domicilio, Razón Social, N° de Acta, Motivo, Normativa). Cada acta se asocia al edificio por su domicilio, el motivo se clasifica en el catálogo y el texto original queda guardado. Si un acta aparece repetida en el mismo domicilio se une en una sola.'}
           {tipo === 'notificados' && 'Subí el listado de edificios notificados (Excel) con Domicilio y Fecha de notificación. El plazo es opcional: puede venir en días, como vencimiento vigente (con prórrogas) o faltar; los notificados sin plazo se cargan igual y se completan después con un listado de plazos. Se guardan también boleta, razón social, inspector y novedades, y el seguimiento se ve en la página Notificados, en la ficha y en el mapa.'}
-          {tipo === 'cruce' && 'Subí el Excel del cruce tal cual está: se ignoran el resumen y las notas, se traducen los nombres de calle de Catastro, se toma la primera altura y se registra el certificado final de Defensa Civil de cada edificio.'}
+          {tipo === 'cruce' && 'Subí el Excel del cruce o de Catastro tal cual está: se ignoran el resumen y las notas, se traducen los nombres de calle, se toma la primera altura y se registra el certificado final de Defensa Civil. Los edificios que ya existen se actualizan con los datos nuevos (padrón, estado de obra, titular, certificado); lo que venga vacío no pisa lo ya cargado y las actas, fotos y notificaciones no se tocan. La importación se puede revertir.'}
         </Alert>
         {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
         {msg && <Alert severity="success" action={lote && esAdmin ? <Button color="inherit" size="small" onClick={revertir}>Revertir</Button> : undefined}>{msg}</Alert>}
@@ -135,23 +135,29 @@ export default function ImportarPage() {
               <Chip color={prev.conErrores ? 'error' : 'default'} label={`${prev.conErrores} con errores`} />
               {!!prev.unidas && <Chip color="info" label={`${prev.unidas} repetidas, se unen`} />}
               {!!prev.conAvisos && <Chip color="warning" label={`${prev.conAvisos} con avisos`} />}
+              {tipo === 'cruce' && <Chip color="primary" variant="outlined" label={`${prev.nuevas ?? 0} nuevos`} />}
+              {tipo === 'cruce' && <Chip color="primary" label={`${prev.aActualizar ?? 0} a actualizar`} />}
+              {tipo === 'cruce' && !!prev.sinCambios && <Chip variant="outlined" label={`${prev.sinCambios} sin cambios`} />}
               {tipo === 'cruce' && <Chip variant="outlined" label={`${prev.certificados ?? 0} con certificado final`} />}
               {tipo === 'fotos' && <Chip variant="outlined" label={`${prev.fotos ?? 0} fotos`} />}
               {tipo === 'fotos' && !!prev.sinDireccion && <Chip color="warning" label={`${prev.sinDireccion} imágenes sin dirección`} />}
               {tipo === 'fotos' && !!prev.ignoradas && <Chip color="warning" label={`${prev.ignoradas} imágenes ignoradas (formato no soportado)`} />}
               <Box sx={{ flex: 1 }} />
-              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>{tipo === 'fotos' ? `Importar ${prev.fotos ?? 0} fotos` : <>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : 'edificios'}</>}</Button>
+              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>{tipo === 'fotos' ? `Importar ${prev.fotos ?? 0} fotos` : <>{tipo === 'cruce' ? `Cargar ${(prev.nuevas ?? 0)} nuevos y actualizar ${(prev.aActualizar ?? 0)}` : <>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : 'edificios'}</>}</>}</Button>
             </Stack>
             <Box sx={{ overflowX: 'auto' }}><Table size="small">
               <TableHead><TableRow><TableCell width={70}>Fila</TableCell><TableCell>Dirección</TableCell><TableCell>Resultado</TableCell></TableRow></TableHead>
               <TableBody>
-                {prev.filas.filter((f) => f.errores.length || f.avisos.length).slice(0, 200).map((f) => (
+                {prev.filas.filter((f) => f.errores.length || f.avisos.length || f.cambios?.length).slice(0, 200).map((f) => (
                   <TableRow key={f.fila}>
                     <TableCell>{f.fila}</TableCell><TableCell>{f.direccion || '—'}</TableCell>
-                    <TableCell sx={{ color: f.errores.length ? 'error.main' : 'warning.main' }}>{[...f.errores, ...f.avisos].join(' · ')}</TableCell>
+                    <TableCell sx={{ color: f.errores.length ? 'error.main' : f.avisos.length ? 'warning.main' : 'text.primary' }}>
+                      {[...f.errores, ...f.avisos].join(' · ')}
+                      {!!f.cambios?.length && <Box component="span" sx={{ color: 'info.main' }}>{f.errores.length || f.avisos.length ? ' · ' : ''}Se actualiza: {f.cambios.join(', ')}</Box>}
+                    </TableCell>
                   </TableRow>
                 ))}
-                {!prev.conErrores && !prev.conAvisos && !prev.unidas && <TableRow><TableCell colSpan={3} align="center" sx={{ color: 'text.secondary' }}>Todas las filas son válidas.</TableCell></TableRow>}
+                {!prev.conErrores && !prev.conAvisos && !prev.unidas && !prev.aActualizar && <TableRow><TableCell colSpan={3} align="center" sx={{ color: 'text.secondary' }}>Todas las filas son válidas.</TableCell></TableRow>}
               </TableBody>
             </Table></Box>
           </Paper>

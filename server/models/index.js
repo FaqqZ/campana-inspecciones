@@ -107,6 +107,8 @@ const edificioSchema = new Schema(
     conclusionCruce: { type: String, default: '', trim: true },
     mismaCalleOtraAltura: { type: Boolean, default: false },
     enListadoSinCert: { type: Boolean, default: false },
+    // Estado anterior de los datos de Catastro, para revertir la última actualización del cruce ({ lote, datos, cert })
+    catastroPrevio: { type: Schema.Types.Mixed, default: undefined },
     informe: { type: String, default: '' }, // texto del informe de inspección (Word de edificios sin final de obra)
     informeLote: { type: String, default: '' },
     origen: { type: String, enum: ['excel', 'manual'], default: 'manual' },

@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const { Notificacion, FotoEdificio, Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
-const { generarPlantilla, leerHoja, leerCruce, leerActas, validarFilas } = require('../services/importador');
+const { generarPlantilla, leerHoja, leerCruce, leerActas, validarFilas, CAMPOS_TEXTO_CATASTRO, presenteCert } = require('../services/importador');
 const { TIPO_CERT, MOTIVO_CERT } = require('../services/catastro');
 const { campanaDe, sincronizarInspeccion } = require('../services/edificios');
 const { procesarPendientes } = require('../services/geocodificador');
@@ -11,10 +11,11 @@ const { extraerGrupos, resolverGrupos } = require('../services/fotosWord');
 const fotosStore = require('../services/fotosStore');
 const { leerNotificados, validarNotificados } = require('../services/notificaciones');
 
-const MAX_FILAS = 2000;
+const MAX_FILAS = 20000;
+const CAMPOS_CATASTRO = [...CAMPOS_TEXTO_CATASTRO.map(([k]) => k), 'mismaCalleOtraAltura', 'enListadoSinCert'];
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) =>
     /\.xlsx$/i.test(file.originalname) ? cb(null, true) : cb(new Error('Solo se aceptan archivos .xlsx')),
 });
@@ -51,7 +52,16 @@ async function preparar(req) {
 
   const { tipo } = req.params;
   let ctx;
-  if (tipo === 'edificios' || tipo === 'cruce') {
+  if (tipo === 'cruce') {
+    // Los edificios que ya están se actualizan: se cargan con sus datos de Catastro y su certificado para comparar.
+    const [ex, tipoDoc] = await Promise.all([
+      Edificio.find({ campana }, `direccionNorm ${CAMPOS_CATASTRO.join(' ')}`).lean(),
+      TipoDocumento.findOne({ nombreNorm: norm(TIPO_CERT) }).lean(),
+    ]);
+    const certs = tipoDoc ? await DocumentoEdificio.find({ edificio: { $in: ex.map((e) => e._id) }, tipo: tipoDoc._id }, 'edificio presente nroReferencia observaciones').lean() : [];
+    const certDe = new Map(certs.map((d) => [String(d.edificio), d]));
+    ctx = { existentes: new Map(ex.map((e) => [e.direccionNorm, { ...e, certificado: certDe.get(String(e._id)) || null }])) };
+  } else if (tipo === 'edificios') {
     const ex = await Edificio.find({ campana }, 'direccionNorm').lean();
     ctx = { existentes: new Set(ex.map((e) => e.direccionNorm)) };
   } else {
@@ -81,6 +91,8 @@ async function preparar(req) {
   return { campana, ctx, resultado: validarFilas(tipo, filas, ctx) };
 }
 
+const validasCruce = (resultado) => resultado.filter((r) => !r.errores.length && !r.unida);
+
 const resumir = (r) => ({
   fila: r.fila,
   direccion: r.data?.direccionOriginal || '',
@@ -89,6 +101,8 @@ const resumir = (r) => ({
   avisos: r.avisos || [],
   unida: Boolean(r.unida),
   nuevos: r.nuevos,
+  cambios: r.cambios || [],
+  actualiza: Boolean(r.data?.actualiza),
 });
 
 // ---- Fotos de edificios desde un Word (.docx) ----
@@ -309,6 +323,11 @@ router.post('/:tipo/previsualizar', tipoValido, permitir('importar'), subir, asy
       unidas,
       conAvisos: resultado.filter((r) => r.avisos?.length && !r.unida).length,
       certificados: resultado.filter((r) => r.data?.cert?.tiene).length,
+      ...(req.params.tipo === 'cruce' && {
+        nuevas: validasCruce(resultado).filter((r) => !r.data.actualiza).length,
+        aActualizar: validasCruce(resultado).filter((r) => r.data.actualiza && r.cambios.length).length,
+        sinCambios: validasCruce(resultado).filter((r) => r.data.actualiza && !r.cambios.length).length,
+      }),
       filas: resultado.map(resumir),
     });
   } catch (e) {
@@ -343,13 +362,60 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
       { upsert: true, new: true }
     );
     const reales = validas.filter((r) => !r.unida);
-    const docs = reales.map(({ data }) => {
-      const { cert, ...resto } = data;
+    const nuevas = reales.filter((r) => !r.data.actualiza);
+    const aActualizar = reales.filter((r) => r.data.actualiza && r.cambios.length);
+    const sinCambios = reales.length - nuevas.length - aActualizar.length;
+    if (!nuevas.length && !aActualizar.length) return res.status(409).json({ message: 'Los edificios del archivo ya tienen estos datos de Catastro: no hay nada para cargar' });
+
+    // Edificios que ya estaban: se actualizan los datos de Catastro (lo vacío del archivo no pisa lo cargado).
+    // Se guarda el estado anterior para poder revertir el lote.
+    let actualizadas = 0;
+    if (aActualizar.length) {
+      const ids = aActualizar.map((r) => r.data.actualiza);
+      const [previos, certs] = await Promise.all([
+        Edificio.find({ _id: { $in: ids } }, CAMPOS_CATASTRO.join(' ')).lean(),
+        DocumentoEdificio.find({ edificio: { $in: ids }, tipo: tipoDoc._id }).lean(),
+      ]);
+      const previoDe = new Map(previos.map((e) => [String(e._id), e]));
+      const certDe = new Map(certs.map((d) => [String(d.edificio), d]));
+      const opsEdificio = [];
+      const opsDoc = [];
+      aActualizar.forEach((r) => {
+        const { data } = r;
+        const id = String(data.actualiza);
+        const previo = previoDe.get(id);
+        const doc = certDe.get(id) || null;
+        const set = {};
+        CAMPOS_TEXTO_CATASTRO.forEach(([k]) => { if (data[k]) set[k] = data[k]; });
+        if (data.presentes.mismaCalle) set.mismaCalleOtraAltura = data.mismaCalleOtraAltura;
+        if (data.presentes.enListado) set.enListadoSinCert = data.enListadoSinCert;
+        set.catastroPrevio = {
+          lote,
+          datos: Object.fromEntries(CAMPOS_CATASTRO.map((k) => [k, previo?.[k] ?? (typeof data[k] === 'boolean' ? false : '')])),
+          cert: doc ? { existia: true, presente: doc.presente, nroReferencia: doc.nroReferencia, observaciones: doc.observaciones } : { existia: false },
+        };
+        opsEdificio.push({ updateOne: { filter: { _id: data.actualiza }, update: { $set: set } } });
+        if (data.presentes.cert) {
+          const { cert } = data;
+          const partes = [cert.expediente && `Expte. ${cert.expediente}`, cert.anio && `año ${cert.anio}`, cert.tiene && 'Cargado desde el cruce Catastro / Defensa Civil'].filter(Boolean);
+          const campos = { presente: presenteCert(data, doc), nroReferencia: cert.numero || doc?.nroReferencia || '', observaciones: partes.length ? partes.join(' · ') : doc?.observaciones || '' };
+          opsDoc.push(doc
+            ? { updateOne: { filter: { _id: doc._id }, update: { $set: campos } } }
+            : { insertOne: { document: { edificio: data.actualiza, tipo: tipoDoc._id, ...campos, lotImportacion: lote } } });
+        }
+      });
+      await Edificio.bulkWrite(opsEdificio, { ordered: false });
+      if (opsDoc.length) await DocumentoEdificio.bulkWrite(opsDoc, { ordered: false });
+      actualizadas = aActualizar.length;
+    }
+
+    const docs = nuevas.map(({ data }) => {
+      const { cert, presentes, actualiza, ...resto } = data;
       return { ...resto, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id };
     });
-    const creados = await Edificio.insertMany(docs, { ordered: false });
+    const creados = docs.length ? await Edificio.insertMany(docs, { ordered: false }) : [];
     const documentos = creados.map((e, i) => {
-      const { cert } = reales[i].data;
+      const { cert } = nuevas[i].data;
       const partes = [cert.expediente && `Expte. ${cert.expediente}`, cert.anio && `año ${cert.anio}`, cert.tiene && 'Cargado desde el cruce Catastro / Defensa Civil'].filter(Boolean);
       return {
         edificio: e._id,
@@ -360,16 +426,18 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
         lotImportacion: lote,
       };
     });
-    await DocumentoEdificio.insertMany(documentos, { ordered: false });
-    audit('importar', 'Edificio', lote, req.user, `${creados.length} edificios (cruce Catastro / Defensa Civil)`);
-    procesarPendientes({ campana });
+    if (documentos.length) await DocumentoEdificio.insertMany(documentos, { ordered: false });
+    audit('importar', 'Edificio', lote, req.user, `${creados.length} edificios nuevos, ${actualizadas} actualizados (cruce Catastro / Defensa Civil)`);
+    if (creados.length) procesarPendientes({ campana });
     return res.status(201).json({
       lote,
       importadas: creados.length,
+      actualizadas,
+      sinCambios,
       unidas: validas.length - reales.length,
       omitidas: resultado.length - validas.length,
       conCertificado: documentos.filter((d) => d.presente).length,
-      geocodificando: true,
+      geocodificando: creados.length > 0,
     });
   }
 
@@ -455,6 +523,31 @@ router.delete('/:tipo/lote/:lote', tipoValido, authorize(), async (req, res) => 
     await sincronizarInspeccion();
     audit('revertir-lote', 'Infraccion', lote, req.user, `${r.deletedCount} infracciones, ${e.deletedCount} edificios`);
     return res.json({ eliminadas: r.deletedCount, edificiosEliminados: e.deletedCount });
+  }
+  if (tipo === 'cruce') {
+    const ids = (await Edificio.find({ lotImportacion: lote }, '_id').lean()).map((e) => e._id);
+    const actualizados = await Edificio.find({ 'catastroPrevio.lote': lote }, 'catastroPrevio').lean();
+    if (!ids.length && !actualizados.length) return res.status(404).json({ message: 'Lote inexistente' });
+    const [docs, actas, insp] = await Promise.all([
+      DocumentoEdificio.exists({ edificio: { $in: ids }, lotImportacion: { $ne: lote } }),
+      Infraccion.exists({ edificio: { $in: ids } }),
+      Inspeccion.exists({ edificio: { $in: ids } }),
+    ]);
+    if (docs || actas || insp)
+      return res.status(409).json({ message: 'Hay edificios del lote con documentación, infracciones o inspecciones cargadas' });
+    const tipoDoc = await TipoDocumento.findOne({ nombreNorm: norm(TIPO_CERT) }).lean();
+    // edificios actualizados: vuelven a los datos que tenían
+    for (const e of actualizados) {
+      const { datos, cert } = e.catastroPrevio;
+      await Edificio.updateOne({ _id: e._id }, { $set: datos, $unset: { catastroPrevio: '' } });
+      if (!tipoDoc) continue;
+      if (cert?.existia) await DocumentoEdificio.updateOne({ edificio: e._id, tipo: tipoDoc._id }, { presente: cert.presente, nroReferencia: cert.nroReferencia, observaciones: cert.observaciones });
+      else await DocumentoEdificio.deleteMany({ edificio: e._id, tipo: tipoDoc._id, lotImportacion: lote });
+    }
+    await DocumentoEdificio.deleteMany({ edificio: { $in: ids }, lotImportacion: lote });
+    const r = await Edificio.deleteMany({ lotImportacion: lote });
+    audit('revertir-lote', 'Edificio', lote, req.user, `${r.deletedCount} eliminados, ${actualizados.length} restaurados`);
+    return res.json({ eliminadas: r.deletedCount, restauradas: actualizados.length });
   }
   const ids = (await Edificio.find({ lotImportacion: lote }, '_id').lean()).map((e) => e._id);
   if (!ids.length) return res.status(404).json({ message: 'Lote inexistente' });
