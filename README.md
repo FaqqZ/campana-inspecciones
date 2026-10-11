@@ -27,7 +27,16 @@ En Windows, desde Git Bash o WSL funcionan los mismos scripts. El archivo export
 Comandos útiles: `docker compose ps` (estado), `docker compose logs -f app`, `docker compose down` (apaga; los datos quedan en volúmenes), `git pull && docker compose up -d --build` (actualiza).
 Por HTTP plano, usuario y contraseña viajan sin cifrar: usarlo solo en red interna, o poner HTTPS (`deploy/Caddyfile`, con `INSECURE_HTTP=false` y `TRUST_PROXY=1`).
 
-## Puesta en marcha (sin Docker)
+## Instalación en una VM Debian (sin Docker)
+```bash
+git clone https://github.com/FaqqZ/campana-inspecciones.git && cd campana-inspecciones
+sudo deploy/instalar-vm.sh                                    # Node 22 + MongoDB 8 + servicio systemd + respaldo diario
+sudo DATOS=campana-datos-<fecha>.tar.gz deploy/instalar-vm.sh # opcional: carga el paquete de deploy/exportar-datos.sh
+```
+Al terminar muestra la URL (`http://<ip>:5003`) y, si es la primera vez, la contraseña de `admin`. Hay que habilitar ese puerto en el firewall de la VM.
+Variables opcionales (`PORT`, `GEO_USER_AGENT`, `HTTPS=1`, `MONGO_URI`, `APP_DIR`) y detalles en la cabecera del script. Para actualizar: `cd /opt/campana-inspecciones && git pull && sudo deploy/instalar-vm.sh`.
+
+## Puesta en marcha (sin Docker, a mano)
 1. MongoDB corriendo. `cd server && cp .env.example .env` y definí `JWT_SECRET` (32+ caracteres), `ADMIN_PASSWORD`
    y **`GEO_USER_AGENT` con un contacto real** (lo exige la política de uso de Nominatim).
 2. `npm install && npm run seed && npm run dev` (API en :5003).
