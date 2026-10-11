@@ -9,7 +9,7 @@ actas/expedientes vinculados e infracciones potenciales.
    y **`GEO_USER_AGENT` con un contacto real** (lo exige la política de uso de Nominatim).
 2. `npm install && npm run seed && npm run dev` (API en :5003).
 3. `cd client && npm install && npm run dev` (http://localhost:5175).
-4. Producción: `npm run build` en `client` y `SERVE_CLIENT=true npm start` en `server`.
+4. Producción: `npm run build` en `client` y `SERVE_CLIENT=true npm start` en `server`. Guía completa en [DEPLOY.md](DEPLOY.md).
 
 ## Flujo de trabajo
 1. **Catálogos**: cargar motivos de infracción, inspectores, estados y oficinas (marcando cuál es el inicial y cuál el final) y
@@ -18,7 +18,7 @@ actas/expedientes vinculados e infracciones potenciales.
 2. **Importar > Edificios**: plantilla con Calle y Número. Se previsualizan errores por fila; al confirmar, las
    direcciones se ubican solas a 1 por segundo (Nominatim) con caché.
    **Importar > Cruce Catastro / Defensa Civil**: acepta el Excel del cruce tal cual.
-3. **Mapa**: filtrar por calle, documentación, infracciones, inspección o calidad de ubicación. Las ubicaciones
+3. **Mapa**: filtrar por calle, documentación, infracciones, inspección, notificación o fotos. Las ubicaciones
    "aproximadas" o "no encontradas" se corrigen a mano (clic o arrastrar el marcador).
 4. **Infracciones**: carga, listado con filtros (texto, estado, oficina, asignado, inspector, motivo, fechas), pases entre
    oficinas con historial, expediente (cierra la infracción) y eliminación lógica con motivo. Se pueden cargar desde esta
@@ -26,7 +26,9 @@ actas/expedientes vinculados e infracciones potenciales.
 5. **Importar > Infracciones**: carga en lote; resuelve el edificio por Calle + Número y puede crear los edificios,
    inspectores y motivos que falten.
 6. **Ficha del edificio**: papeles con vencimiento, infracciones, posibles infracciones y visitas.
-7. **Usuarios** (solo Administrador): alta, rol, activación y cambio de contraseña.
+7. **Fotos y notificados**: *Importar > Fotos (Word)* asocia las imágenes de un .docx a cada dirección; *Importar > Edificios notificados* carga el listado de notificaciones con sus plazos (o sin ellos) y se sigue en la página **Notificados**, en la ficha y en el mapa.
+8. **Indicadores**: edificios y Catastro, edificios notificados e infracciones.
+9. **Usuarios** (solo Administrador): alta, rol, activación y cambio de contraseña.
 
 ## Roles
 Administrador (todo), Técnico (carga y edita infracciones, edificios y catálogos), Jurídico y Dirección (cursan pases),
