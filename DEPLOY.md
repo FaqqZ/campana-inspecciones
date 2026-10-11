@@ -68,6 +68,17 @@ Detrás de un proxy con HTTPS (Nginx, Caddy o el que ofrezca el hosting). Verifi
 
 Si el cliente va aparte (Vercel): configurar `VITE_API_URL=https://<api>/api` en el build, `CORS_ORIGIN=https://<cliente>` en el servidor, y dejar `client/vercel.json` (ya tiene la reescritura a `index.html`).
 
+## 4 bis. Servicio, HTTPS y respaldos en una VM
+
+Plantillas en `deploy/`:
+- `campana-inspecciones.service`: unidad de systemd (reinicio automático, `SERVE_CLIENT=true`, `TRUST_PROXY=1`).
+  `sudo cp deploy/campana-inspecciones.service /etc/systemd/system/ && sudo systemctl enable --now campana-inspecciones`.
+- `Caddyfile`: proxy inverso con HTTPS automático hacia `127.0.0.1:5003`.
+- `backup.sh`: `mongodump` + `uploads/` con retención de 14 días (cron).
+
+`GET /api/health` devuelve 200 con MongoDB conectado y 503 si no, para monitoreo. Con proxy, definir `TRUST_PROXY=1`
+(si no, el límite de intentos de login ve la IP del proxy para todos).
+
 ## 5. Llevar los datos actuales a la nube
 
 Hoy los datos reales están en MongoDB local (base `campana-inspecciones`) y las fotos en `server/uploads/`.

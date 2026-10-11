@@ -1,0 +1,25 @@
+# /etc/systemd/system/campana-inspecciones.service
+# Ajustar User y WorkingDirectory a la ruta real del repositorio en la VM.
+[Unit]
+Description=Campaña de inspecciones (API + cliente)
+After=network.target mongod.service
+Wants=mongod.service
+
+[Service]
+Type=simple
+User=campana
+WorkingDirectory=/opt/campana-inspecciones/server
+Environment=NODE_ENV=production
+Environment=SERVE_CLIENT=true
+Environment=TRUST_PROXY=1
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+# Endurecimiento básico
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/campana-inspecciones/server/uploads
+
+[Install]
+WantedBy=multi-user.target

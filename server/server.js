@@ -14,6 +14,12 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || /poner-una-
 const { auth, users } = require('./routes/auth');
 
 const app = express();
+// Detrás de Caddy/Nginx: toma la IP real del cliente (necesario para el límite de intentos de login).
+if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+app.get('/api/health', (req, res) => {
+  const ok = mongoose.connection.readyState === 1;
+  res.status(ok ? 200 : 503).json({ ok });
+});
 app.use(
   helmet({
     contentSecurityPolicy: {

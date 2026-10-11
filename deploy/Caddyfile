@@ -1,0 +1,9 @@
+# /etc/caddy/Caddyfile — HTTPS automático (Let's Encrypt). Reemplazar el dominio.
+inspecciones.ejemplo.com {
+	encode gzip
+	# Subida de Excel/Word: ajustar si hace falta
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy 127.0.0.1:5003
+}
