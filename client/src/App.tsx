@@ -1,7 +1,9 @@
-import { ReactNode } from 'react';
-import { Navigate, Route, Routes, NavLink, Outlet } from 'react-router-dom';
-import { AppBar, Avatar, Box, Button, Chip, CircularProgress, Stack, Toolbar, Typography } from '@mui/material';
+import { ReactNode, useState } from 'react';
+import { Link, Navigate, Route, Routes, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { AppBar, Avatar, Box, ButtonBase, CircularProgress, Divider, ListItemIcon, Menu, MenuItem, Stack, Toolbar, Typography } from '@mui/material';
 import MapIcon from '@mui/icons-material/Map';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { SIN_LOGIN, useAuth } from './auth';
 import Login from './pages/Login';
 import MapaPage from './pages/MapaPage';
@@ -34,8 +36,58 @@ const link = ({ isActive }: { isActive: boolean }) => ({
   whiteSpace: 'nowrap' as const,
 });
 
-function Layout() {
+const ADMIN = [
+  { to: '/importar', label: 'Importar', accion: 'importar' as Accion },
+  { to: '/catalogos', label: 'Catálogos' },
+  { to: '/usuarios', label: 'Usuarios', accion: 'usuarios' as Accion },
+];
+
+/** Importar, Catálogos y Usuarios: uso ocasional, agrupados para no cargar el header. */
+function MenuAdmin({ rol }: { rol: Parameters<typeof can>[0] }) {
+  const [ancla, setAncla] = useState<HTMLElement | null>(null);
+  const { pathname } = useLocation();
+  const items = ADMIN.filter((i) => !i.accion || can(rol, i.accion));
+  const activo = items.some((i) => pathname.startsWith(i.to));
+  return (
+    <>
+      <ButtonBase onClick={(e) => setAncla(e.currentTarget)} aria-haspopup="menu" aria-expanded={!!ancla}
+        sx={{ ...link({ isActive: activo }), font: 'inherit', fontSize: 14, fontWeight: activo ? 600 : 400, pr: '8px', display: 'inline-flex', alignItems: 'center' }}>
+        Administración <ArrowDropDownIcon fontSize="small" />
+      </ButtonBase>
+      <Menu anchorEl={ancla} open={!!ancla} onClose={() => setAncla(null)}>
+        {items.map((i) => (
+          <MenuItem key={i.to} component={Link} to={i.to} selected={pathname.startsWith(i.to)} onClick={() => setAncla(null)}>{i.label}</MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
+/** Usuario y salir en un solo control. */
+function MenuUsuario() {
   const { user, logout } = useAuth();
+  const [ancla, setAncla] = useState<HTMLElement | null>(null);
+  return (
+    <>
+      <ButtonBase onClick={(e) => setAncla(e.currentTarget)} aria-label="Cuenta" sx={{ borderRadius: 8 }}>
+        <Avatar sx={{ width: 34, height: 34, bgcolor: '#e8a317 !important', color: '#2a1d00 !important', fontSize: 15 }}>{user!.nombres[0]}</Avatar>
+      </ButtonBase>
+      <Menu anchorEl={ancla} open={!!ancla} onClose={() => setAncla(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+        <Box sx={{ px: 2, py: 1 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>{user!.apellidos}, {user!.nombres}</Typography>
+          <Typography variant="caption" color="text.secondary">{user!.role}</Typography>
+        </Box>
+        <Divider />
+        <MenuItem onClick={() => { setAncla(null); logout(); }}>
+          <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>Salir
+        </MenuItem>
+      </Menu>
+    </>
+  );
+}
+
+function Layout() {
+  const { user } = useAuth();
   const rol = user!.role;
   return (
     <Box sx={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
@@ -53,13 +105,9 @@ function Layout() {
             <NavLink to="/infracciones" style={link}>Infracciones</NavLink>
             <NavLink to="/notificados" style={link}>Notificados</NavLink>
             <NavLink to="/kpis" style={link}>Indicadores</NavLink>
-            {can(rol, 'importar') && <NavLink to="/importar" style={link}>Importar</NavLink>}
-            <NavLink to="/catalogos" style={link}>Catálogos</NavLink>
-            {can(rol, 'usuarios') && <NavLink to="/usuarios" style={link}>Usuarios</NavLink>}
+            <MenuAdmin rol={rol} />
           </Stack>
-          <Chip size="small" avatar={<Avatar sx={{ bgcolor: '#e8a317 !important', color: '#2a1d00 !important' }}>{user!.nombres[0]}</Avatar>}
-            label={`${user!.apellidos}, ${user!.nombres} · ${rol}`} sx={{ color: '#fff', bgcolor: 'rgba(255,255,255,.14)', maxWidth: { xs: 190, md: 'none' } }} />
-          <Button color="inherit" onClick={logout}>Salir</Button>
+          <Box sx={{ ml: { xs: 'auto', md: 0 } }}><MenuUsuario /></Box>
         </Toolbar>
       </AppBar>
       {SIN_LOGIN && <Box sx={{ bgcolor: '#e8a317', color: '#2a1d00', textAlign: 'center', py: 0.5, fontSize: 13 }}>Modo demostración: datos ficticios, los cambios no se guardan.</Box>}
