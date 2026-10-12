@@ -26,11 +26,13 @@ const sinHttps = process.env.INSECURE_HTTP === 'true';
 app.use(
   helmet({
     hsts: !sinHttps,
+    // OSM rechaza los mosaicos sin Referer (helmet por defecto manda no-referrer)
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
         ...(sinHttps && { 'upgrade-insecure-requests': null }),
-        'img-src': ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org'], // blob: para las fotos de los edificios (se piden con sesión)
+        'img-src': ["'self'", 'data:', 'blob:', 'https://tile.openstreetmap.org', 'https://*.tile.openstreetmap.org'], // blob: para las fotos de los edificios (se piden con sesión)
       },
     },
   })
