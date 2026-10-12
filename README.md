@@ -36,6 +36,17 @@ sudo DATOS=campana-datos-<fecha>.tar.gz deploy/instalar-vm.sh # opcional: carga 
 Al terminar muestra la URL (`http://<ip>:5003`) y, si es la primera vez, la contraseña de `admin`. Hay que habilitar ese puerto en el firewall de la VM.
 Variables opcionales (`PORT`, `GEO_USER_AGENT`, `HTTPS=1`, `MONGO_URI`, `APP_DIR`) y detalles en la cabecera del script. Para actualizar: `cd /opt/campana-inspecciones && git pull && sudo deploy/instalar-vm.sh`.
 
+## Instalación en Windows Server (sin Docker)
+Requisitos: Windows Server 2019 o superior (MongoDB 8 no corre en 2016), acceso a internet y PowerShell como Administrador.
+```powershell
+git clone https://github.com/FaqqZ/campana-inspecciones.git; cd campana-inspecciones
+powershell -ExecutionPolicy Bypass -File deploy\instalar-windows.ps1
+```
+Instala Node 22 y MongoDB 8 (si faltan), compila el cliente, genera `server\.env` con una contraseña de `admin` aleatoria (la muestra al final), crea la tarea de inicio automático `CampanaInspecciones` (arranca con el servidor y se reinicia sola), abre el puerto 5003 en el firewall de Windows y programa un respaldo diario a las 02:30 en `C:\campana-backups`.
+Opciones: `-Port 8080`, `-GeoUserAgent "campana (contacto: mail)"`, `-Https` (hay un proxy con HTTPS delante), `-MongoUri "mongodb://..."`, `-AppDir D:\campana` y `-Datos C:\ruta\campana-datos-....tar.gz` (carga un paquete de `deploy/exportar-datos.sh`; reemplaza la base local).
+Para actualizar: `cd C:\campana-inspecciones; git pull; powershell -ExecutionPolicy Bypass -File deploy\instalar-windows.ps1` (no pisa el `.env` ni los datos). Registro: `Get-Content C:\campana-inspecciones\logs\server.log -Tail 50 -Wait`. Reiniciar: `Stop-ScheduledTask CampanaInspecciones; Start-ScheduledTask CampanaInspecciones`.
+Si el servidor está en la nube, habilitar el puerto también en el grupo de seguridad / firewall de la red.
+
 ## Puesta en marcha (sin Docker, a mano)
 1. MongoDB corriendo. `cd server && cp .env.example .env` y definí `JWT_SECRET` (32+ caracteres), `ADMIN_PASSWORD`
    y **`GEO_USER_AGENT` con un contacto real** (lo exige la política de uso de Nominatim).

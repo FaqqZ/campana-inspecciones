@@ -79,6 +79,9 @@ Plantillas en `deploy/`:
 `GET /api/health` devuelve 200 con MongoDB conectado y 503 si no, para monitoreo. Con proxy, definir `TRUST_PROXY=1`
 (si no, el límite de intentos de login ve la IP del proxy para todos).
 
+### 4 ter. Windows Server
+`deploy/instalar-windows.ps1` (ver README) hace lo mismo que `instalar-vm.sh`: Node + MongoDB local, `server\.env`, tarea programada de inicio (`CampanaInspecciones`, como SYSTEM, con reinicio automático), regla de firewall y respaldo diario (`deploy/backup-windows.ps1`, mongodump + zip de fotos, 14 días). No usa NSSM ni Docker. Para HTTPS poner delante IIS (ARR) o Caddy para Windows y ejecutar con `-Https`.
+
 ## 5. Llevar los datos actuales a la nube
 
 Hoy los datos reales están en MongoDB local (base `campana-inspecciones`) y las fotos en `server/uploads/`.
