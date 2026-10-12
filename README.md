@@ -77,7 +77,7 @@ Si el servidor está en la nube, habilitar el puerto también en el grupo de seg
 Para llegar al mismo estado en cualquier instalación, cargar con **Administración > Importar** en este orden:
 1. **Cruce Catastro / Defensa Civil**: el Excel del cruce tal cual (crea los edificios del cruce).
 2. **Actas** (infracciones): el listado de actas, con "Crear los edificios que falten" activado.
-3. **Edificios notificados**: primero el listado con domicilio y fecha y después el listado **con plazos** (hojas "Con plazo vigente" / "Cruce completo"): las notificaciones cargadas sin plazo se completan con el segundo. Dejar apagado "Crear los edificios que falten": si no, se crea un edificio por cada domicilio desconocido.
+3. **Edificios notificados**: primero el listado con domicilio y fecha y después el listado **con plazos** (hojas "Con plazo vigente" / "Cruce completo"): las notificaciones cargadas sin plazo se completan con el segundo. Con "Crear los edificios que falten" **activado** se cargan todas las filas (el listado de plazos trae 45 filas, 26 con plazo vencido, y 32 domicilios que no están en el cruce: se crean como edificios nuevos). Si se apaga, esas 33 filas se omiten con el error "No existe un edificio" y quedan solo 12 notificaciones.
 4. **Cruce Catastro verificado** (modo actualizar): actualiza padrón, estado de obra y certificado de los edificios existentes sin pisar con vacíos; los nuevos se crean.
 5. **Fotos (Word)**.
 6. En **Notificados**: botón *Pasar N vencidas a acta* (las notificaciones vencidas pasan a "Pasó a acta").
