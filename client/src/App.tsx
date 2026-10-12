@@ -110,7 +110,7 @@ function Layout() {
           <Box sx={{ ml: { xs: 'auto', md: 0 } }}><MenuUsuario /></Box>
         </Toolbar>
       </AppBar>
-      {SIN_LOGIN && <Box sx={{ bgcolor: '#e8a317', color: '#2a1d00', textAlign: 'center', py: 0.5, fontSize: 13 }}>{SNAPSHOT ? 'Vista de avance: copia de solo lectura de los datos, los cambios no se guardan.' : 'Modo demostración: datos ficticios, los cambios no se guardan.'}</Box>}
+      {SIN_LOGIN && !SNAPSHOT && <Box sx={{ bgcolor: '#e8a317', color: '#2a1d00', textAlign: 'center', py: 0.5, fontSize: 13 }}>Modo demostración: datos ficticios, los cambios no se guardan.</Box>}
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <Outlet />
       </Box>
