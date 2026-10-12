@@ -29,4 +29,9 @@ async function borrar(edificioId, archivo) {
   await fs.promises.rmdir(carpeta(edificioId)).catch(() => {}); // si quedó vacía
 }
 
-module.exports = { guardar, ruta, borrar };
+/** Borra todas las fotos de todos los edificios. */
+async function borrarTodo() {
+  await fs.promises.rm(RAIZ, { recursive: true, force: true });
+}
+
+module.exports = { guardar, ruta, borrar, borrarTodo };

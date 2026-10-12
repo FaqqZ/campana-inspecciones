@@ -1,8 +1,9 @@
 const router = require('express').Router();
 const XLSX = require('xlsx');
-const { Edificio, DocumentoEdificio, Infraccion, AuditLog } = require('../models');
+const { Edificio, DocumentoEdificio, Infraccion, Notificacion, FotoEdificio, Inspeccion, AuditLog } = require('../models');
 const { protect, authorize } = require('../middleware/auth');
-const { campanaDe, tiposActivos } = require('../services/edificios');
+const { campanaDe, tiposActivos, sincronizarInspeccion } = require('../services/edificios');
+const fotosStore = require('../services/fotosStore');
 const { evaluarEdificio } = require('../services/semaforo');
 
 router.use(protect, authorize());
@@ -51,6 +52,47 @@ router.get('/respaldo', async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="campana-respaldo.xlsx"');
   res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+});
+
+// ---- Eliminar lo cargado (solo Administrador). Los catálogos, usuarios, campaña y auditoría no se tocan. ----
+const ALCANCES = ['todo', 'infracciones', 'notificaciones', 'fotos'];
+
+router.get('/datos', async (req, res) => {
+  const campana = await campanaDe(req);
+  const [edificios, infracciones, notificaciones, fotos] = await Promise.all([
+    Edificio.countDocuments({ campana }).setOptions({ incluirOcultos: true }),
+    Infraccion.countDocuments({}),
+    Notificacion.countDocuments({}),
+    FotoEdificio.countDocuments({}),
+  ]);
+  res.json({ edificios, infracciones, notificaciones, fotos });
+});
+
+router.delete('/datos', async (req, res) => {
+  const { alcance, confirmar } = req.body || {};
+  if (!ALCANCES.includes(alcance)) return res.status(400).json({ message: 'Alcance inválido' });
+  if (confirmar !== 'ELIMINAR') return res.status(400).json({ message: 'Escribí ELIMINAR para confirmar' });
+  const borrados = {};
+  if (alcance === 'todo' || alcance === 'infracciones') {
+    borrados.infracciones = (await Infraccion.deleteMany({})).deletedCount;
+  }
+  if (alcance === 'todo' || alcance === 'notificaciones') {
+    borrados.notificaciones = (await Notificacion.deleteMany({})).deletedCount;
+  }
+  if (alcance === 'todo' || alcance === 'fotos') {
+    borrados.fotos = (await FotoEdificio.deleteMany({})).deletedCount;
+    await fotosStore.borrarTodo();
+  }
+  if (alcance === 'todo') {
+    const campana = await campanaDe(req);
+    borrados.documentos = (await DocumentoEdificio.deleteMany({})).deletedCount;
+    borrados.inspecciones = (await Inspeccion.deleteMany({})).deletedCount;
+    borrados.edificios = (await Edificio.deleteMany({ campana })).deletedCount;
+  } else if (alcance === 'infracciones') {
+    await sincronizarInspeccion();
+  }
+  await AuditLog.create({ accion: 'eliminar-datos', entidad: 'Campana', entidadId: alcance, usuario: req.user._id, detalle: JSON.stringify(borrados) });
+  res.json({ borrados });
 });
 
 router.get('/auditoria', async (req, res) => {

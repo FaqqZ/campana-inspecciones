@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Container, FormControlLabel, LinearProgress, Paper, Stack, Switch, Table, TableBody,
+  Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, TextField, LinearProgress, Paper, Stack, Switch, Table, TableBody,
   TableCell, TableHead, TableRow, ToggleButton, ToggleButtonGroup, Typography,
 } from '@mui/material';
 import { api, errMsg } from '../api';
@@ -26,6 +26,19 @@ export default function ImportarPage() {
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progreso | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const [datos, setDatos] = useState<Record<string, number> | null>(null);
+  const [borrar, setBorrar] = useState<{ alcance: string; texto: string } | null>(null);
+  const cargarDatos = () => { if (esAdmin) api.get('/admin/datos').then((r) => setDatos(r.data)).catch(() => {}); };
+  useEffect(cargarDatos, [esAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const eliminar = async () => {
+    if (!borrar) return;
+    try {
+      const r = await api.delete('/admin/datos', { data: { alcance: borrar.alcance, confirmar: borrar.texto } });
+      setMsg(`Se eliminó: ${Object.entries(r.data.borrados).map(([k, v]) => `${v} ${k}`).join(', ')}.`);
+      setError(''); setBorrar(null); setPrev(null); setLote(null); cargarDatos();
+    } catch (e) { setError(errMsg(e)); }
+  };
 
   // Progreso de geocodificación mientras haya pendientes
   useEffect(() => {
@@ -165,6 +178,36 @@ export default function ImportarPage() {
             </Table></Box>
           </Paper>
         )}
+
+        {esAdmin && datos && (
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Eliminar lo cargado</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Hay {datos.edificios} edificios, {datos.infracciones} infracciones, {datos.notificaciones} notificaciones y {datos.fotos} fotos. Sirve para empezar de nuevo antes de volver a importar. Los catálogos y los usuarios no se tocan. No se puede deshacer: conviene hacer un respaldo antes.
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+              <Button color="error" variant="outlined" onClick={() => setBorrar({ alcance: 'infracciones', texto: '' })}>Eliminar infracciones</Button>
+              <Button color="error" variant="outlined" onClick={() => setBorrar({ alcance: 'notificaciones', texto: '' })}>Eliminar notificaciones</Button>
+              <Button color="error" variant="outlined" onClick={() => setBorrar({ alcance: 'fotos', texto: '' })}>Eliminar fotos</Button>
+              <Button color="error" variant="contained" onClick={() => setBorrar({ alcance: 'todo', texto: '' })}>Eliminar todo (edificios y lo asociado)</Button>
+            </Stack>
+          </Paper>
+        )}
+        <Dialog open={!!borrar} onClose={() => setBorrar(null)} fullWidth maxWidth="xs">
+          <DialogTitle>Confirmar eliminación</DialogTitle>
+          <DialogContent>
+            <DialogContentText sx={{ mb: 2 }}>
+              {borrar?.alcance === 'todo'
+                ? 'Se eliminarán todos los edificios, con sus documentos, fotos, notificaciones e infracciones.'
+                : `Se eliminarán todas las ${borrar?.alcance} cargadas.`} Esta acción no se puede deshacer. Escribí ELIMINAR para continuar.
+            </DialogContentText>
+            <TextField autoFocus fullWidth size="small" value={borrar?.texto ?? ''} onChange={(e) => setBorrar({ ...borrar!, texto: e.target.value })} />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setBorrar(null)}>Cancelar</Button>
+            <Button color="error" variant="contained" disabled={borrar?.texto !== 'ELIMINAR'} onClick={eliminar}>Eliminar</Button>
+          </DialogActions>
+        </Dialog>
 
         {prog && total > 0 && (prog.corriendo || prog.pendientes > 0) && (
           <Paper sx={{ p: 2 }}>

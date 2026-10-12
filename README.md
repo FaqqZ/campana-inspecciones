@@ -72,6 +72,8 @@ Para llegar al mismo estado en cualquier instalación, cargar con **Administraci
 6. En **Notificados**: botón *Pasar N vencidas a acta* (las notificaciones vencidas pasan a "Pasó a acta").
 7. En **Edificios**: botón *Ocultar no encontradas* (los edificios que no se pudieron ubicar dejan de verse; *Mostrar ocultos* los devuelve).
 
+Para empezar de nuevo (por ejemplo en la VM), el Administrador puede usar **Importar > Eliminar lo cargado**: borra infracciones, notificaciones, fotos o todo (edificios y lo asociado) pidiendo escribir ELIMINAR. No toca catálogos ni usuarios y no se puede deshacer: hacer antes un respaldo (`deploy/backup.sh`).
+
 ## Roles
 Administrador (todo), Técnico (carga y edita infracciones, edificios y catálogos), Jurídico y Dirección (cursan pases),
 Mesa de Entradas (genera expedientes) y Consulta (solo lectura). Matriz en `server/config/permisos.js`
