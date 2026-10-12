@@ -4,7 +4,7 @@ import { AppBar, Avatar, Box, ButtonBase, CircularProgress, Divider, ListItemIco
 import MapIcon from '@mui/icons-material/Map';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import LogoutIcon from '@mui/icons-material/Logout';
-import { SIN_LOGIN, useAuth } from './auth';
+import { SIN_LOGIN, SNAPSHOT, useAuth } from './auth';
 import Login from './pages/Login';
 import MapaPage from './pages/MapaPage';
 import EdificiosPage from './pages/EdificiosPage';
@@ -110,7 +110,7 @@ function Layout() {
           <Box sx={{ ml: { xs: 'auto', md: 0 } }}><MenuUsuario /></Box>
         </Toolbar>
       </AppBar>
-      {SIN_LOGIN && <Box sx={{ bgcolor: '#e8a317', color: '#2a1d00', textAlign: 'center', py: 0.5, fontSize: 13 }}>Modo demostración: datos ficticios, los cambios no se guardan.</Box>}
+      {SIN_LOGIN && <Box sx={{ bgcolor: '#e8a317', color: '#2a1d00', textAlign: 'center', py: 0.5, fontSize: 13 }}>{SNAPSHOT ? 'Vista de avance: copia de solo lectura de los datos, los cambios no se guardan.' : 'Modo demostración: datos ficticios, los cambios no se guardan.'}</Box>}
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <Outlet />
       </Box>

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { demoAdapter } from './demo';
+import { snapshotAdapter } from './snapshot';
 
 export type Rol = 'Administrador' | 'Tecnico' | 'Juridico' | 'Direccion' | 'MesaDeEntradas' | 'Consulta';
 export interface Usuario {
@@ -185,7 +186,8 @@ export const setToken = (t: string | null) => {
 };
 
 export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' });
-if (import.meta.env.VITE_SIN_LOGIN === 'true') api.defaults.adapter = demoAdapter; // demostración sin servidor
+if (import.meta.env.VITE_SNAPSHOT === 'true') api.defaults.adapter = snapshotAdapter; // vista de avance con datos reales, sin servidor
+else if (import.meta.env.VITE_SIN_LOGIN === 'true') api.defaults.adapter = demoAdapter; // demostración sin servidor
 api.interceptors.request.use((cfg) => {
   const t = getToken();
   if (t) cfg.headers.Authorization = `Bearer ${t}`;

@@ -10,6 +10,8 @@ interface AuthCtx {
 
 // Solo para pruebas de la interfaz sin servidor (VITE_SIN_LOGIN=true en el build): entra sin credenciales.
 export const SIN_LOGIN = import.meta.env.VITE_SIN_LOGIN === 'true';
+// Vista de avance con una copia de solo lectura de los datos reales (VITE_SNAPSHOT=true, junto con VITE_SIN_LOGIN=true).
+export const SNAPSHOT = import.meta.env.VITE_SNAPSHOT === 'true';
 const USUARIO_PRUEBA: Usuario = { id: 'prueba', nombres: 'Prueba', apellidos: 'Sin login', username: 'prueba', role: 'Administrador' };
 
 const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);

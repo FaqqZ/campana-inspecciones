@@ -5,3 +5,4 @@ dist
 .DS_Store
 server/uploads
 db/postgres/datos
+client/public/snapshot.json
