@@ -62,6 +62,16 @@ Variables opcionales (`PORT`, `GEO_USER_AGENT`, `HTTPS=1`, `MONGO_URI`, `APP_DIR
 8. **Indicadores**: edificios y Catastro, edificios notificados e infracciones.
 9. **Usuarios** (solo Administrador): alta, rol, activación y cambio de contraseña.
 
+## Orden de carga de los Excel (base vacía)
+Para llegar al mismo estado en cualquier instalación, cargar con **Administración > Importar** en este orden:
+1. **Cruce Catastro / Defensa Civil**: el Excel del cruce tal cual (crea los edificios del cruce).
+2. **Actas** (infracciones): el listado de actas, con "Crear los edificios que falten" activado.
+3. **Edificios notificados**: primero el listado con domicilio y fecha y después el listado **con plazos** (hojas "Con plazo vigente" / "Cruce completo"): las notificaciones cargadas sin plazo se completan con el segundo. Dejar apagado "Crear los edificios que falten": si no, se crea un edificio por cada domicilio desconocido.
+4. **Cruce Catastro verificado** (modo actualizar): actualiza padrón, estado de obra y certificado de los edificios existentes sin pisar con vacíos; los nuevos se crean.
+5. **Fotos (Word)**.
+6. En **Notificados**: botón *Pasar N vencidas a acta* (las notificaciones vencidas pasan a "Pasó a acta").
+7. En **Edificios**: botón *Ocultar no encontradas* (los edificios que no se pudieron ubicar dejan de verse; *Mostrar ocultos* los devuelve).
+
 ## Roles
 Administrador (todo), Técnico (carga y edita infracciones, edificios y catálogos), Jurídico y Dirección (cursan pases),
 Mesa de Entradas (genera expedientes) y Consulta (solo lectura). Matriz en `server/config/permisos.js`

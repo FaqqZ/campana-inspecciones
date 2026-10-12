@@ -8,6 +8,8 @@ import { api, errMsg, fmtFecha, Notificacion } from '../api';
 import { useMapa } from '../store';
 import PlazoChip from '../components/PlazoChip';
 import { PLAZO } from '../semaforo';
+import { useAuth } from '../auth';
+import { can } from '../utils/permisos';
 
 const LIMITE = 25;
 interface Resumen { sinPlazo: number; notificados: number; enPlazo: number; porVencer: number; vencidos: number; presentaron: number; pasaronAActa: number }
@@ -32,6 +34,8 @@ export default function NotificadosPage() {
   const [todas, setTodas] = useState(false);
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+  const { user } = useAuth();
 
   const cargar = useCallback(() => {
     api.get('/notificaciones', { params: { page, limit: LIMITE, estadoPlazo: estado || undefined, search: search || undefined, todas: todas ? 'si' : undefined } })
@@ -40,7 +44,18 @@ export default function NotificadosPage() {
   }, [page, estado, search, todas]);
 
   useEffect(() => { const t = setTimeout(cargar, 250); return () => clearTimeout(t); }, [cargar]);
-  useEffect(() => { api.get('/notificaciones/kpis').then((r) => setResumen(r.data.resumen)).catch(() => {}); }, []);
+  const cargarResumen = useCallback(() => { api.get('/notificaciones/kpis').then((r) => setResumen(r.data.resumen)).catch(() => {}); }, []);
+  useEffect(() => { cargarResumen(); }, [cargarResumen]);
+
+  const vencidasAActa = async () => {
+    if (!window.confirm(`Las ${resumen?.vencidos} notificaciones con plazo vencido pasarán a "Pasó a acta". Se puede corregir editando cada una. ¿Continuar?`)) return;
+    try {
+      const r = await api.post('/notificaciones/vencidas-a-acta');
+      setMsg(`${r.data.actualizadas} notificaciones pasaron a acta`);
+      cargar();
+      cargarResumen();
+    } catch (e) { setError(errMsg(e)); }
+  };
 
   const direccion = (n: Notificacion) => (typeof n.edificio === 'object' ? n.edificio.direccionOriginal : '');
   const idEdificio = (n: Notificacion) => (typeof n.edificio === 'object' ? n.edificio._id : n.edificio ?? null);
@@ -50,6 +65,7 @@ export default function NotificadosPage() {
       <Stack spacing={3}>
         <Typography variant="h5">Edificios notificados</Typography>
         {error && <Alert severity="error">{error}</Alert>}
+        {msg && <Alert severity="success" onClose={() => setMsg('')}>{msg}</Alert>}
         {resumen && (
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
             <Tarjeta titulo="Edificios notificados" valor={resumen.notificados} />
@@ -68,6 +84,7 @@ export default function NotificadosPage() {
               <MenuItem value="">Todos</MenuItem>
               {Object.entries(PLAZO).map(([k, v]) => <MenuItem key={k} value={k}>{v.label}</MenuItem>)}
             </TextField>
+            {can(user?.role, 'editarEdificios') && (resumen?.vencidos || 0) > 0 && <Button color="warning" onClick={vencidasAActa}>Pasar {resumen?.vencidos} vencidas a acta</Button>}
             <Button onClick={() => { setTodas((v) => !v); setPage(1); }}>{todas ? 'Ver solo la vigente de cada edificio' : 'Ver historial completo'}</Button>
           </Stack>
           <Box sx={{ overflowX: 'auto' }}>

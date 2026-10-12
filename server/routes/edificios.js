@@ -102,6 +102,24 @@ router.get('/resumen', async (req, res) => {
   });
 });
 
+// Ocultar / mostrar edificios que no se pudieron ubicar (no aparecen en mapa, listados ni indicadores; sus datos se conservan)
+router.get('/ocultos', async (req, res) => {
+  const campana = await campanaDe(req);
+  res.json(await Edificio.find({ campana, oculto: true }).select('direccionOriginal ocultoMotivo').sort('direccionOriginal').lean());
+});
+router.post('/ocultar-no-encontrados', permitir('editarEdificios'), async (req, res) => {
+  const campana = await campanaDe(req);
+  const r = await Edificio.updateMany({ campana, geoEstado: 'fallido', oculto: { $ne: true } }, { oculto: true, ocultoMotivo: 'No se pudo ubicar en el mapa' });
+  audit('ocultar', 'Edificio', null, req.user, `${r.modifiedCount} edificios no encontrados`);
+  res.json({ ocultados: r.modifiedCount });
+});
+router.post('/mostrar-ocultos', permitir('editarEdificios'), async (req, res) => {
+  const campana = await campanaDe(req);
+  const r = await Edificio.updateMany({ campana, oculto: true }, { oculto: false, ocultoMotivo: '' });
+  audit('mostrar', 'Edificio', null, req.user, `${r.modifiedCount} edificios`);
+  res.json({ mostrados: r.modifiedCount });
+});
+
 // Alta manual
 router.post('/', permitir('editarEdificios'), async (req, res) => {
   const campana = await campanaDe(req);

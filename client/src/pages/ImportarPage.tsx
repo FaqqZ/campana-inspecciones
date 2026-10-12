@@ -120,6 +120,9 @@ export default function ImportarPage() {
             {(esInfra(tipo) || tipo === 'fotos' || tipo === 'notificados') && (
               <FormControlLabel control={<Switch checked={crearEdificios} onChange={(e) => { setCrearEdificios(e.target.checked); setPrev(null); }} />} label="Crear los edificios que falten" />
             )}
+            {tipo === 'notificados' && crearEdificios && (
+              <Alert severity="warning" sx={{ flexBasis: '100%' }}>Se creará un edificio nuevo por cada domicilio que no exista en la campaña. Para notificados conviene dejarlo apagado: así solo se cargan los edificios que ya están.</Alert>
+            )}
             {tipo === 'infracciones' && esAdmin && (
               <FormControlLabel control={<Switch checked={crearCatalogos} onChange={(e) => { setCrearCatalogos(e.target.checked); setPrev(null); }} />} label="Crear inspectores y motivos que no existan" />
             )}

@@ -56,6 +56,17 @@ router.get('/', async (req, res) => {
   res.json({ items: lista.slice((page - 1) * limit, page * limit), total: lista.length, page, limit });
 });
 
+// Pasa a "Pasó a acta" la notificación vigente de cada edificio cuyo plazo ya venció (se puede deshacer editando cada una)
+router.post('/vencidas-a-acta', permitir('editarEdificios'), async (req, res) => {
+  const campana = await campanaDe(req);
+  const ids = (await Edificio.find({ campana }, '_id').lean()).map((e) => e._id);
+  const lista = enriquecer(await Notificacion.find({ edificio: { $in: ids } }).lean());
+  const vencidas = lista.filter((n) => n.vigente && n.estadoPlazo === 'vencido').map((n) => n._id);
+  if (vencidas.length) await Notificacion.updateMany({ _id: { $in: vencidas } }, { resultado: 'acta' });
+  audit('vencidas-a-acta', 'Notificacion', null, req.user, `${vencidas.length} notificaciones`);
+  res.json({ actualizadas: vencidas.length });
+});
+
 router.post('/', permitir('editarEdificios'), async (req, res) => {
   const edificio = await Edificio.findById(req.body.edificio);
   if (!edificio) return bad(res, 'El edificio no existe');

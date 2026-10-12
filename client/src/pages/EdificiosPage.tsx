@@ -42,9 +42,11 @@ export default function EdificiosPage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [recarga, setRecarga] = useState(0);
+  const [ocultos, setOcultos] = useState(0);
   const [nuevo, setNuevo] = useState<{ calle: string; numero: string; titular: string; uso: string; observaciones: string } | null>(null);
 
   useEffect(() => { api.get('/edificios/resumen').then((r) => setResumen(r.data)).catch((e) => setError(errMsg(e))); }, [recarga]);
+  useEffect(() => { api.get('/edificios/ocultos').then((r) => setOcultos(r.data.length)).catch(() => {}); }, [recarga]);
   useEffect(() => {
     const t = setTimeout(() => {
       api.get('/edificios', { params: { page, limit: LIMITE, geoEstado: geoEstado || undefined, calle: calle || undefined } })
@@ -59,6 +61,22 @@ export default function EdificiosPage() {
     try {
       const r = await api.post('/geocodificar/reintentar-fallidos');
       setMsg(`${r.data.reencolados} direcciones vueltas a la cola`);
+      setRecarga((x) => x + 1);
+    } catch (e) { setError(errMsg(e)); }
+  };
+
+  const ocultar = async () => {
+    if (!window.confirm('Los edificios que no se pudieron ubicar dejarán de verse en el mapa, los listados y los indicadores. Sus datos se conservan y se pueden volver a mostrar. ¿Continuar?')) return;
+    try {
+      const r = await api.post('/edificios/ocultar-no-encontrados');
+      setMsg(`${r.data.ocultados} edificios ocultos`);
+      setRecarga((x) => x + 1);
+    } catch (e) { setError(errMsg(e)); }
+  };
+  const mostrar = async () => {
+    try {
+      const r = await api.post('/edificios/mostrar-ocultos');
+      setMsg(`${r.data.mostrados} edificios vueltos a mostrar`);
       setRecarga((x) => x + 1);
     } catch (e) { setError(errMsg(e)); }
   };
@@ -103,6 +121,8 @@ export default function EdificiosPage() {
             <Box sx={{ flex: 1 }} />
             {can(user?.role, 'editarEdificios') && <Button variant="contained" onClick={() => setNuevo({ calle: '', numero: '', titular: '', uso: '', observaciones: '' })}>Agregar edificio</Button>}
             {can(user?.role, 'editarEdificios') && (resumen?.porGeo.fallido || 0) > 0 && <Button onClick={reintentar}>Reintentar no encontradas</Button>}
+            {can(user?.role, 'editarEdificios') && (resumen?.porGeo.fallido || 0) > 0 && <Button color="warning" onClick={ocultar}>Ocultar no encontradas</Button>}
+            {can(user?.role, 'editarEdificios') && ocultos > 0 && <Button onClick={mostrar}>Mostrar {ocultos} ocultos</Button>}
           </Stack>
           <Box sx={{ overflowX: 'auto' }}><Table size="small">
             <TableHead>
