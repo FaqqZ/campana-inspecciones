@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Exporta una copia de solo lectura de los datos (vía API) a client/public/snapshot.json, para publicar una vista de
+// Exporta una copia de solo lectura de los datos (vía API) a client/public/snapshot.json (y las fotos a client/public/fotos/), para publicar una vista de
 // avance sin backend (build del cliente con VITE_SNAPSHOT=true y VITE_SIN_LOGIN=true). El archivo contiene datos reales:
 // está en .gitignore y el sitio que lo sirva debe tener acceso restringido.
 //   node deploy/exportar-snapshot.js            (usa server/.env; el servidor debe estar corriendo)
@@ -37,7 +37,17 @@ const paginar = async (url, limit, params = {}) => {
   const notificaciones = await paginar('/notificaciones', 200, { todas: 'si' });
   const mapa = (await get('/edificios/mapa')).puntos;
   const fichas = {};
-  for (const e of edificios) fichas[e._id] = await get(`/edificios/${e._id}`);
+  const dirFotos = path.join(__dirname, '..', 'client', 'public', 'fotos');
+  fs.rmSync(dirFotos, { recursive: true, force: true });
+  fs.mkdirSync(dirFotos, { recursive: true });
+  let nFotos = 0;
+  for (const e of edificios) {
+    fichas[e._id] = await get(`/edificios/${e._id}`);
+    for (const f of fichas[e._id].fotos || []) {
+      const r = await fetch(`${BASE}/edificios/${e._id}/fotos/${f._id}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) { fs.writeFileSync(path.join(dirFotos, f._id), Buffer.from(await r.arrayBuffer())); nFotos++; }
+    }
+  }
   const infDetalle = {};
   for (const i of infracciones) infDetalle[i._id] = await get(`/infracciones/${i._id}`);
   const cat = {};
@@ -54,5 +64,5 @@ const paginar = async (url, limit, params = {}) => {
   const destino = path.join(__dirname, '..', 'client', 'public', 'snapshot.json');
   fs.mkdirSync(path.dirname(destino), { recursive: true });
   fs.writeFileSync(destino, JSON.stringify(snap));
-  console.log(`snapshot.json: ${edificios.length} edificios, ${infracciones.length} infracciones, ${notificaciones.length} notificaciones, ${(fs.statSync(destino).size / 1e6).toFixed(1)} MB`);
+  console.log(`snapshot.json: ${edificios.length} edificios, ${infracciones.length} infracciones, ${notificaciones.length} notificaciones, ${nFotos} fotos, ${(fs.statSync(destino).size / 1e6).toFixed(1)} MB`);
 })().catch((e) => { console.error(e.message); process.exit(1); });

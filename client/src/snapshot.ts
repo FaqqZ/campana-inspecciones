@@ -23,10 +23,10 @@ function responder(d: any, url: string, p: P): unknown {
   if (u === '/auth/me') return { id: 'avance', nombres: 'Vista', apellidos: 'de avance', username: 'avance', role: 'Administrador' };
   if (u === '/edificios/mapa') {
     const ids = new Set(edificiosFiltrados().map((e: any) => e._id));
-    const lista = d.mapa.filter((x: any) => ids.has(x.id) && (!p.semaforo || x.semaforo === p.semaforo) &&
+    const lista = d.mapa.filter((x: any) => ids.has(x.id) && (!p.semaforo || x.semaforo === p.semaforo) && (p.conFotos !== 'si' || x.fotos > 0) &&
       (!p.notificado || (p.notificado === 'si' ? x.plazo : x.plazo === p.notificado)));
     const sinUbicar = edificiosFiltrados().filter((e: any) => e.lat == null || e.lng == null).length;
-    return { puntos: lista.map((x: any) => ({ ...x, fotos: 0 })), total: lista.length + sinUbicar, sinUbicar };
+    return { puntos: lista, total: lista.length + sinUbicar, sinUbicar };
   }
   if (u === '/edificios/calles') {
     const m = new Map<string, { calleNorm: string; calle: string; cantidad: number }>();
@@ -41,7 +41,7 @@ function responder(d: any, url: string, p: P): unknown {
   if (u === '/edificios/kpis') return d.kpisEdificios;
   if (u === '/edificios') { const r = pagina(edificiosFiltrados(), p, 50, 200); return { total: r.total, page: r.page, items: r.items }; }
   const ed = u.match(/^\/edificios\/([^/]+)$/);
-  if (ed) return d.fichas[ed[1]] ? { ...d.fichas[ed[1]], fotos: [] } : { demo: true };
+  if (ed) return d.fichas[ed[1]] ? d.fichas[ed[1]] : { demo: true };
   if (u === '/notificaciones/kpis') return d.kpisNotificaciones;
   if (u === '/notificaciones') {
     const l = d.notificaciones.filter((n: any) => (p.todas === 'si' || n.vigente) && (!p.estadoPlazo || n.estadoPlazo === p.estadoPlazo) &&
@@ -72,6 +72,12 @@ function responder(d: any, url: string, p: P): unknown {
 export const snapshotAdapter: AxiosAdapter = async (config: InternalAxiosRequestConfig) => {
   if ((config.method || 'get').toLowerCase() !== 'get')
     return Promise.reject(Object.assign(new Error('solo lectura'), { isAxiosError: true, config, response: { status: 400, data: { message: 'Vista de avance: solo lectura, no se guardan cambios' }, config } }));
+  const foto = (config.url || '').match(/^\/edificios\/[^/]+\/fotos\/([^/]+)$/);
+  if (foto) {
+    const r = await fetch(`/fotos/${foto[1]}`);
+    if (!r.ok) return Promise.reject(Object.assign(new Error('foto'), { isAxiosError: true, config, response: { status: 404, data: {}, config } }));
+    return { data: await r.blob(), status: 200, statusText: 'OK', headers: {}, config };
+  }
   const data = responder(await datos(), config.url || '', config.params || {});
   return { data, status: 200, statusText: 'OK', headers: {}, config };
 };

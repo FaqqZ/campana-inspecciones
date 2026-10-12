@@ -6,3 +6,4 @@ dist
 server/uploads
 db/postgres/datos
 client/public/snapshot.json
+client/public/fotos/
