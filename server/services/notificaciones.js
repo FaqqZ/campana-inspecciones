@@ -54,13 +54,13 @@ function resultadoDe(estado) {
 /** Resultado de la notificación: el guardado o, en las cargadas antes, el que surge del estado de la planilla ("Dio cumplimiento" = presentó documentación). */
 const resultadoEfectivo = (n) => n.resultado || (n.estadoPlanilla === 'Dio cumplimiento' ? 'presento' : '');
 
-/** Estado de la planilla normalizado ('' si no es uno de los cuatro conocidos). */
+/** Estado de la planilla normalizado ('' si no es exactamente uno de los cuatro; "Plazo vencido…" y otros textos libres no cuentan). */
 function estadoPlanillaDe(estado) {
-  const t = norm(estado);
-  if (/para infraccion/.test(t)) return 'Para infracción';
-  if (/dio cumplimiento/.test(t)) return 'Dio cumplimiento';
-  if (/^plazo/.test(t)) return 'Plazo';
-  if (/^notificad/.test(t)) return 'Notificado';
+  const t = norm(estado).replace(/\s+/g, ' ');
+  if (t === 'para infraccion') return 'Para infracción';
+  if (t === 'dio cumplimiento') return 'Dio cumplimiento';
+  if (t === 'plazo') return 'Plazo';
+  if (t === 'notificado') return 'Notificado';
   return '';
 }
 

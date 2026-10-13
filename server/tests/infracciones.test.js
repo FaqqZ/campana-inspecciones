@@ -142,13 +142,16 @@ test('kpis de Defensa Civil: edificios por tipo de actuación, tipologías y nor
     { edificio: 'c', resultado: 'presento' },
   ];
   const k = calcularKpisDefensaCivil(infr, notif);
-  assert.deepEqual(k.resumen, { edificiosAlcanzados: 2, actuaciones: 6, notificaciones: 3, infracciones: 3, edificiosConInfracciones: 2, edificiosNotificados: 2, edificiosConAmbas: 1, soloInfraccion: 1, soloNotificacion: 1 });
-  // alcanzados = edificios notificados; los notificados se reparten en solo notificación / notificación + infracción
-  assert.equal(k.resumen.edificiosAlcanzados, k.resumen.edificiosNotificados);
-  assert.deepEqual(k.porTipoActuacion.map((x) => x.cantidad), [1, 1]);
+  assert.deepEqual(k.resumen, { edificiosAlcanzados: 3, actuaciones: 6, notificaciones: 3, infracciones: 3, edificiosConInfracciones: 2, edificiosNotificados: 2, edificiosConAmbas: 1, soloInfraccion: 1, soloNotificacion: 1 });
+  // alcanzados = con infracción + notificados − en ambos
+  assert.equal(k.resumen.edificiosAlcanzados, k.resumen.edificiosConInfracciones + k.resumen.edificiosNotificados - k.resumen.edificiosConAmbas);
+  assert.deepEqual(k.porTipoActuacion.map((x) => x.cantidad), [1, 1, 1]); // Infracciones / Notificaciones / Notificaciones + Infracciones
   assert.equal(k.porTipoActuacion.reduce((n, x) => n + x.cantidad, 0), k.resumen.edificiosAlcanzados);
   assert.deepEqual(k.estadoNotificaciones.map((x) => x.cantidad), [1, 0, 1, 1]);
   assert.equal(k.porTipologia.find((x) => x.nombre === 'Extintores').cantidad, 1);
+  // mismo orden fijo que el Excel, mostrando también las categorías sin casos
+  assert.deepEqual(k.porTipologia.slice(0, 3).map((x) => x.nombre), ['Extintores', 'Red contra incendios (nichos/mangueras/lanzas/picos/bocas)', 'Luces de emergencia']);
+  assert.equal(k.porTipologia.length, 7);
   assert.equal(k.porTipologia.find((x) => /múltiples/.test(x.nombre)).cantidad, 1);
   assert.deepEqual(k.edificiosPorCantidad.map((x) => x.cantidad), [1, 1, 0, 0]);
   assert.equal(k.porNormativa.find((x) => x.nombre === 'Dto. 756/97 - Art. 3').cantidad, 1);

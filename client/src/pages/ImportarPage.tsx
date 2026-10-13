@@ -104,7 +104,7 @@ export default function ImportarPage() {
     <Container maxWidth="lg" sx={{ py: 3 }}>
       <Stack spacing={3}>
         <Typography variant="h5">Importar desde Excel</Typography>
-        <ToggleButtonGroup exclusive value={tipo} onChange={(_, v) => { if (v) { setTipo(v); setPrev(null); setMsg(''); setCrearEdificios(v !== 'notificados'); } }} size="small">
+        <ToggleButtonGroup exclusive value={tipo} onChange={(_, v) => { if (v) { setTipo(v); setPrev(null); setMsg(''); setCrearEdificios(true); } }} size="small">
           <ToggleButton value="edificios">Edificios (direcciones)</ToggleButton>
           <ToggleButton value="infracciones">Infracciones</ToggleButton>
           <ToggleButton value="cruce">Cruce Catastro / Defensa Civil</ToggleButton>
@@ -134,7 +134,7 @@ export default function ImportarPage() {
               <FormControlLabel control={<Switch checked={crearEdificios} onChange={(e) => { setCrearEdificios(e.target.checked); setPrev(null); }} />} label="Crear los edificios que falten" />
             )}
             {tipo === 'notificados' && crearEdificios && (
-              <Alert severity="info" sx={{ flexBasis: '100%' }}>Se creará un edificio nuevo por cada domicilio que no exista en la campaña. Si lo apagás, las filas de domicilios que no existen se omiten con el error «No existe un edificio» (incluidas las notificaciones vencidas de esos edificios).</Alert>
+              <Alert severity="info" sx={{ flexBasis: '100%' }}>Se creará un edificio nuevo por cada domicilio que no exista en la campaña. Si lo apagás, las filas de domicilios que no existen se omiten con el error «No existe un edificio».</Alert>
             )}
             {tipo === 'infracciones' && esAdmin && (
               <FormControlLabel control={<Switch checked={crearCatalogos} onChange={(e) => { setCrearCatalogos(e.target.checked); setPrev(null); }} />} label="Crear inspectores y motivos que no existan" />

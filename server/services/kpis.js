@@ -234,10 +234,16 @@ function contarNormativas(infracciones) {
   return [...m.values()].sort((x, y) => y.cantidad - x.cantidad || x.nombre.localeCompare(y.nombre));
 }
 
+// Orden de las categorías en las láminas del Excel de la campaña (se muestran todas, aun con cantidad 0).
+const ORDEN_TIPOLOGIA_INFRACCIONES = ['Extintores', 'Red contra incendios (nichos/mangueras/lanzas/picos/bocas)', 'Luces de emergencia', 'Incumplimiento de intimación previa', 'Balizas / señalización', 'Impedimento de inspección', TIPOLOGIA_MULTIPLE];
+const ORDEN_TIPOLOGIA_EDIFICIOS = ['Red contra incendios (nichos/mangueras/lanzas/picos/bocas)', 'Luces de emergencia', 'Extintores', 'Incumplimiento de intimación previa', 'Balizas / señalización', 'Impedimento de inspección', TIPOLOGIA_MULTIPLE];
+/** Ordena según el orden dado; lo que no esté en la lista va al final por cantidad. */
+const enOrden = (items, orden) => [...orden.map((nombre) => items.find((i) => i.nombre === nombre) || { nombre, cantidad: 0 }), ...items.filter((i) => !orden.includes(i.nombre))];
+
 const ESTADOS_PLANILLA = ['Para infracción', 'Notificado', 'Plazo', 'Dio cumplimiento'];
 
 /**
- * Indicadores de Defensa Civil. Edificios alcanzados = edificios notificados; las actuaciones son notificaciones + actas.
+ * Indicadores de Defensa Civil. Edificios alcanzados = edificios con notificación o con acta; las actuaciones son notificaciones + actas.
  * infracciones: [{ edificio:{_id}, motivosInfraccion:[{nombre}], normativa }]
  * notificaciones: [{ edificio:{_id}|id, estadoPlanilla, resultado, fechaVencimiento }]
  */
@@ -245,6 +251,7 @@ function calcularKpisDefensaCivil(infracciones, notificaciones = [], { hoy = new
   const idDe = (x) => String(x.edificio?._id ?? x.edificio);
   const conActa = new Set(infracciones.map(idDe));
   const conNotif = new Set(notificaciones.map(idDe));
+  const alcanzados = new Set([...conActa, ...conNotif]);
   const soloActa = [...conActa].filter((id) => !conNotif.has(id)).length;
   const soloNotif = [...conNotif].filter((id) => !conActa.has(id)).length;
   const ambos = [...conActa].filter((id) => conNotif.has(id)).length;
@@ -270,7 +277,7 @@ function calcularKpisDefensaCivil(infracciones, notificaciones = [], { hoy = new
 
   return {
     resumen: {
-      edificiosAlcanzados: conNotif.size,
+      edificiosAlcanzados: alcanzados.size,
       actuaciones: notificaciones.length + infracciones.length,
       notificaciones: notificaciones.length,
       infracciones: infracciones.length,
@@ -280,14 +287,15 @@ function calcularKpisDefensaCivil(infracciones, notificaciones = [], { hoy = new
       soloInfraccion: soloActa,
       soloNotificacion: soloNotif,
     },
-    // Universo: edificios alcanzados = edificios notificados. Los edificios con infracción y sin notificación registrada se informan aparte.
+    // Universo: edificios alcanzados = edificios de la tabla maestra (con notificación, con acta o con ambas)
     porTipoActuacion: [
-      { nombre: 'Solo notificación', cantidad: soloNotif, porcentaje: dePorcentaje(soloNotif, conNotif.size) },
-      { nombre: 'Notificación + infracción', cantidad: ambos, porcentaje: dePorcentaje(ambos, conNotif.size) },
+      { nombre: 'Infracciones', cantidad: soloActa, porcentaje: dePorcentaje(soloActa, alcanzados.size) },
+      { nombre: 'Notificaciones', cantidad: soloNotif, porcentaje: dePorcentaje(soloNotif, alcanzados.size) },
+      { nombre: 'Notificaciones + Infracciones', cantidad: ambos, porcentaje: dePorcentaje(ambos, alcanzados.size) },
     ],
     estadoNotificaciones: ESTADOS_PLANILLA.map((nombre) => ({ nombre, cantidad: notificaciones.filter((n) => estadoDeNotificacion(n) === nombre).length })),
-    porTipologia: contar(tipologias, (t) => t.tipologia),
-    edificiosPorTipologia: [...edificiosPorTipologia].map(([nombre, ids]) => ({ nombre, cantidad: ids.size })).sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre)),
+    porTipologia: enOrden(contar(tipologias, (t) => t.tipologia), ORDEN_TIPOLOGIA_INFRACCIONES),
+    edificiosPorTipologia: enOrden([...edificiosPorTipologia].map(([nombre, ids]) => ({ nombre, cantidad: ids.size })), ORDEN_TIPOLOGIA_EDIFICIOS),
     porNormativa: contarNormativas(infracciones),
     edificiosPorCantidad: [
       { nombre: '1 infracción', cantidad: conCantidad(1, 1) },

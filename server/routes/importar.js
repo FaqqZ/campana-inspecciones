@@ -281,7 +281,12 @@ router.post('/notificados/confirmar', permitir('importar'), subir, async (req, r
     vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado, estadoPlanilla: r.data.estadoPlanilla,
   });
   const completar = validas.filter((r) => r.data.actualiza);
-  for (const r of completar) await Notificacion.updateOne({ _id: r.data.actualiza }, campos(r));
+  // Al completar plazos, lo que el listado de plazos trae vacío no pisa lo ya cargado (estado de la planilla, resultado, novedad, boleta...).
+  const NO_PISAR_VACIO = ['observaciones', 'boleta', 'razonSocial', 'inspector', 'resultado'];
+  for (const r of completar) {
+    const set = Object.fromEntries(Object.entries(campos(r)).filter(([k, v]) => k !== 'estadoPlanilla' && !(NO_PISAR_VACIO.includes(k) && !v))); // el estado de la planilla lo manda el listado de notificados, no el de plazos
+    await Notificacion.updateOne({ _id: r.data.actualiza }, set);
+  }
   await Notificacion.insertMany(validas.filter((r) => !r.data.actualiza).map((r) => ({
     edificio: r.data.edificio, fechaNotificacion: r.data.fechaNotificacion, plazoDias: r.data.plazoDias,
     fechaVencimiento: r.data.fechaVencimiento, observaciones: r.data.observaciones,

@@ -19,6 +19,8 @@ interface KpisDC {
   porNormativa: Item[]; edificiosPorCantidad: Item[];
 }
 const num = (n: number) => n.toLocaleString('es-AR');
+/** Permite cortar la línea después de una barra ("nichos/mangueras/...") sin partir palabras. */
+const cortable = (t: string) => t.replace(/\//g, '/\u200b');
 const pct = (n: number, total: number) => (total ? Math.round((n / total) * 100) : 0);
 
 /** Paleta categórica (orden fijo, validada en claro y oscuro) y rampa ordinal azul para valores ordenados. */
@@ -26,13 +28,18 @@ const PALETAS = {
   light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
   dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
 };
-const RAMPAS = { light: ['#86b6ef', '#3987e5', '#1c5cab', '#0d366b'], dark: ['#184f95', '#256abf', '#5598e7', '#9ec5f4'] };
+/** Colores de las tortas y de la lámina de respaldo del Excel de la campaña. */
+const EXCEL = {
+  actuacion: ['#2EB1FF', '#0066FF', '#F4DC00'],
+  estados: ['#0066FF', '#2EB1FF', '#F4DC00', '#92D050'],
+  respaldo: ['#0066FF', '#00B0F0', '#F4DC00', '#92D050'],
+};
 const useModo = () => (useTheme().palette.mode === 'dark' ? 'dark' : 'light');
 const useColores = () => PALETAS[useModo()];
 
 function Tile({ titulo, valor, detalle, color }: { titulo: string; valor: string; detalle?: string; color?: string }) {
   return (
-    <Paper sx={{ p: 2, flex: '1 1 170px', minWidth: 170, borderLeft: color ? `4px solid ${color}` : undefined }}>
+    <Paper sx={{ p: 2, flex: '1 1 190px', minWidth: 0, overflow: 'hidden', borderLeft: color ? `4px solid ${color}` : undefined }}>
       <Typography variant="caption" color="text.secondary">{titulo}</Typography>
       <Typography sx={{ fontSize: 30, fontWeight: 600, lineHeight: 1.2 }}>{valor}</Typography>
       {detalle && <Typography variant="caption" color="text.secondary">{detalle}</Typography>}
@@ -42,7 +49,7 @@ function Tile({ titulo, valor, detalle, color }: { titulo: string; valor: string
 
 function Panel({ titulo, children, ancho = 420 }: { titulo: string; children: React.ReactNode; ancho?: number }) {
   return (
-    <Paper sx={{ p: 2, flex: `1 1 ${ancho}px`, minWidth: 0 }}>
+    <Paper sx={{ p: 2, flex: `1 1 ${ancho}px`, minWidth: 0, overflow: 'hidden' }}>
       <Typography variant="subtitle2" sx={{ mb: 1.5 }}>{titulo}</Typography>
       {children}
     </Paper>
@@ -52,12 +59,14 @@ function Panel({ titulo, children, ancho = 420 }: { titulo: string; children: Re
 const SinDatos = () => <Typography variant="body2" color="text.secondary">Sin datos.</Typography>;
 
 /** Gráfico de anillo con leyenda: cada categoría con su color, cantidad y porcentaje. Al pasar el cursor resalta la porción. */
-function Dona({ items, centro }: { items: Item[]; centro: string }) {
-  const colores = useColores();
+function Dona({ items, centro, torta = false, paleta }: { items: Item[]; centro: string; torta?: boolean; paleta?: string[] }) {
+  const base = useColores();
+  const colores = paleta ?? base;
   const [sel, setSel] = useState<number | null>(null);
   const total = items.reduce((n, i) => n + i.cantidad, 0);
   if (!total) return <SinDatos />;
-  const r = 58;
+  const r = torta ? 36 : 56;
+  const ancho = torta ? 72 : 24;
   const c = 2 * Math.PI * r;
   const visibles = items.filter((i) => i.cantidad > 0).length;
   let acumulado = 0;
@@ -76,17 +85,17 @@ function Dona({ items, centro }: { items: Item[]; centro: string }) {
               return (
                 <circle
                   key={i.nombre} cx="80" cy="80" r={r} fill="none" stroke={colores[k % colores.length]}
-                  strokeWidth={sel === k ? 28 : 24} strokeDasharray={`${trazo} ${c - trazo}`} strokeDashoffset={desfase}
+                  strokeWidth={sel === k ? ancho + 4 : ancho} strokeDasharray={`${trazo} ${c - trazo}`} strokeDashoffset={desfase}
                   onMouseEnter={() => setSel(k)} onMouseLeave={() => setSel(null)} style={{ cursor: 'default', transition: 'stroke-width .12s' }}
                 />
               );
             })}
           </g>
         </svg>
-        <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', textAlign: 'center', px: 4 }}>
+        {!torta && <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', textAlign: 'center', px: 4 }}>
           <Typography sx={{ fontSize: 26, fontWeight: 600, lineHeight: 1.1 }}>{num(actual ? actual.cantidad : total)}</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>{actual ? `${pct(actual.cantidad, total)}%` : centro}</Typography>
-        </Box>
+        </Box>}
       </Box>
       <Stack spacing={0.75} sx={{ flex: '1 1 220px', minWidth: 0 }}>
         {items.map((i, k) => (
@@ -96,7 +105,7 @@ function Dona({ items, centro }: { items: Item[]; centro: string }) {
           >
             <Box sx={{ width: 12, height: 12, mt: '4px', borderRadius: '3px', bgcolor: colores[k % colores.length] }} />
             <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2">{i.nombre}</Typography>
+              <Typography variant="body2">{cortable(i.nombre)}</Typography>
               {i.detalle && <Typography variant="caption" color="text.secondary">{i.detalle}</Typography>}
             </Box>
             <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
@@ -109,46 +118,30 @@ function Dona({ items, centro }: { items: Item[]; centro: string }) {
   );
 }
 
+/** Fila de barras: nombre | pista con la barra | valor. La barra se mide dentro de su pista y nunca invade el valor. */
+const FILA = { display: 'grid', gridTemplateColumns: 'minmax(110px, 36%) minmax(0, 1fr) minmax(64px, auto)', alignItems: 'center', columnGap: 1.5 } as const;
+
 /** Barras horizontales, una por categoría, cada una con su color; nombre (y detalle), cantidad y porcentaje siempre visibles. */
-function Barras({ items, total }: { items: Item[]; total?: number }) {
-  const colores = useColores();
+function Barras({ items, total, paleta }: { items: Item[]; total?: number; paleta?: string[] }) {
+  const base = useColores();
+  const colores = paleta ?? base;
   const max = Math.max(1, ...items.map((i) => i.cantidad));
   if (!items.length) return <SinDatos />;
   return (
     <Stack spacing={1.25}>
       {items.map((i, k) => (
         <Tooltip key={i.nombre} placement="top-start" title={`${i.nombre}${i.detalle ? ` (${i.detalle})` : ''}: ${num(i.cantidad)}${total ? ` (${pct(i.cantidad, total)}%)` : ''}`}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 40%) 1fr', alignItems: 'center', columnGap: 1.5 }}>
+          <Box sx={FILA}>
             <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" sx={{ lineHeight: 1.25 }}>{i.nombre}</Typography>
-              {i.detalle && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.25 }}>{i.detalle}</Typography>}
+              <Typography variant="body2" sx={{ lineHeight: 1.25, overflowWrap: 'break-word' }}>{cortable(i.nombre)}</Typography>
+              {i.detalle && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.25 }}>{cortable(i.detalle)}</Typography>}
             </Box>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Box sx={{ height: 16, width: `${(i.cantidad / max) * 100}%`, minWidth: 4, bgcolor: colores[k % colores.length], borderRadius: '0 4px 4px 0' }} />
-              <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                {num(i.cantidad)}{total ? <Typography component="span" variant="caption" color="text.secondary"> · {pct(i.cantidad, total)}%</Typography> : null}
-              </Typography>
-            </Stack>
-          </Box>
-        </Tooltip>
-      ))}
-    </Stack>
-  );
-}
-
-/** Columnas verticales para categorías ordenadas (de menos a más): rampa de un solo tono, de claro a oscuro. */
-function Columnas({ items, total }: { items: Item[]; total?: number }) {
-  const rampa = RAMPAS[useModo()];
-  const max = Math.max(1, ...items.map((i) => i.cantidad));
-  if (!items.length) return <SinDatos />;
-  return (
-    <Stack direction="row" sx={{ gap: '8px', alignItems: 'flex-end', height: 190 }}>
-      {items.map((i, k) => (
-        <Tooltip key={i.nombre} title={`${i.nombre}: ${num(i.cantidad)}${total ? ` (${pct(i.cantidad, total)}%)` : ''}`} placement="top">
-          <Box sx={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', cursor: 'default' }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{num(i.cantidad)}</Typography>
-            <Box sx={{ width: '100%', maxWidth: 72, height: `${(i.cantidad / max) * 100 * 0.62}%`, minHeight: i.cantidad ? 3 : 0, bgcolor: rampa[Math.min(k, rampa.length - 1)], borderRadius: '4px 4px 0 0' }} />
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, textAlign: 'center', lineHeight: 1.2, minHeight: 30 }}>{i.nombre}</Typography>
+            <Box sx={{ height: 16, minWidth: 0 }}>
+              <Box sx={{ height: '100%', width: `${(i.cantidad / max) * 100}%`, minWidth: i.cantidad ? 4 : 0, bgcolor: colores[k % colores.length], borderRadius: '0 4px 4px 0' }} />
+            </Box>
+            <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', textAlign: 'right' }}>
+              {num(i.cantidad)}{total ? <Typography component="span" variant="caption" color="text.secondary"> · {pct(i.cantidad, total)}%</Typography> : null}
+            </Typography>
           </Box>
         </Tooltip>
       ))}
@@ -162,7 +155,7 @@ function Apiladas({ items, etiquetas }: { items: { nombre: string; a: number; b:
   const max = Math.max(1, ...items.map((i) => i.a + i.b));
   return (
     <Stack spacing={1.25}>
-      <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
+      <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
         {etiquetas.map((e, k) => (
           <Stack key={e} direction="row" spacing={0.75} alignItems="center">
             <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: colores[k] }} />
@@ -172,15 +165,15 @@ function Apiladas({ items, etiquetas }: { items: { nombre: string; a: number; b:
       </Stack>
       {items.map((i) => (
         <Tooltip key={i.nombre} placement="top-start" title={`${i.nombre}: ${num(i.a)} ${etiquetas[0].toLowerCase()} · ${num(i.b)} ${etiquetas[1].toLowerCase()}`}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 40%) 1fr', alignItems: 'center', columnGap: 1.5 }}>
-            <Typography variant="body2" sx={{ lineHeight: 1.25 }}>{i.nombre}</Typography>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Stack direction="row" sx={{ gap: '2px', width: `${((i.a + i.b) / max) * 100}%`, minWidth: 4 }}>
-                {i.a > 0 && <Box sx={{ flex: i.a, height: 16, bgcolor: colores[0], borderRadius: '0 0 0 0' }} />}
-                {i.b > 0 && <Box sx={{ flex: i.b, height: 16, bgcolor: colores[1], borderRadius: '0 4px 4px 0' }} />}
+          <Box sx={FILA}>
+            <Typography variant="body2" sx={{ lineHeight: 1.25, overflowWrap: 'anywhere' }}>{i.nombre}</Typography>
+            <Box sx={{ height: 16, minWidth: 0 }}>
+              <Stack direction="row" sx={{ gap: '2px', height: '100%', width: `${((i.a + i.b) / max) * 100}%`, minWidth: 4 }}>
+                {i.a > 0 && <Box sx={{ flex: i.a, bgcolor: colores[0] }} />}
+                {i.b > 0 && <Box sx={{ flex: i.b, bgcolor: colores[1], borderRadius: '0 4px 4px 0' }} />}
               </Stack>
-              <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{num(i.a)} / {num(i.b)}</Typography>
-            </Stack>
+            </Box>
+            <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', textAlign: 'right' }}>{num(i.a)} / {num(i.b)}</Typography>
           </Box>
         </Tooltip>
       ))}
@@ -221,9 +214,9 @@ function DefensaCivil() {
     <Stack spacing={3}>
       <Filtros desde={desde} hasta={hasta} setDesde={setDesde} setHasta={setHasta} texto="Avance de la campaña de fiscalización de Defensa Civil. Las actas se pueden filtrar por fecha." />
       <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
-        <Tile color={c[0]} titulo="Edificios alcanzados" valor={num(r.edificiosAlcanzados)} detalle="edificios con al menos una notificación" />
+        <Tile color={c[0]} titulo="Edificios alcanzados" valor={num(r.edificiosAlcanzados)} detalle="con notificación o acta (tabla maestra)" />
         <Tile color={c[1]} titulo="Actuaciones registradas" valor={num(r.actuaciones)} detalle="notificaciones + actas de infracción" />
-        <Tile color={c[2]} titulo="Notificaciones realizadas" valor={num(r.notificaciones)} detalle={`en ${num(r.edificiosAlcanzados)} edificios`} />
+        <Tile color={c[2]} titulo="Notificaciones realizadas" valor={num(r.notificaciones)} detalle={`en ${num(r.edificiosNotificados)} edificios`} />
         <Tile color={c[3]} titulo="Infracciones registradas" valor={num(r.infracciones)} detalle={`en ${num(r.edificiosConInfracciones)} edificios`} />
       </Stack>
       <Typography variant="caption" color="text.secondary">
@@ -231,10 +224,10 @@ function DefensaCivil() {
       </Typography>
       <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
         <Panel titulo="Edificios según tipo de actuación" ancho={360}>
-          <Dona items={d.porTipoActuacion} centro="edificios" />
+          <Dona torta items={d.porTipoActuacion} centro="edificios" paleta={EXCEL.actuacion} />
         </Panel>
         <Panel titulo="Estado de las notificaciones" ancho={360}>
-          <Dona items={d.estadoNotificaciones} centro="notificaciones" />
+          <Dona torta items={d.estadoNotificaciones} centro="notificaciones" paleta={EXCEL.estados} />
         </Panel>
       </Stack>
       <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
@@ -247,7 +240,7 @@ function DefensaCivil() {
       <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
         <Panel titulo="Actas según normativa infringida"><Barras items={d.porNormativa} total={r.infracciones} /></Panel>
         <Panel titulo="Edificios según cantidad de infracciones">
-          <Columnas items={d.edificiosPorCantidad} total={r.edificiosConInfracciones} />
+          <Barras items={d.edificiosPorCantidad} total={r.edificiosConInfracciones} paleta={EXCEL.respaldo} />
         </Panel>
       </Stack>
     </Stack>
@@ -267,7 +260,7 @@ function Catastro() {
   if (error) return <Alert severity="error">{error}</Alert>;
   if (!ek) return <Box sx={{ p: 6, textAlign: 'center' }}><CircularProgress /></Box>;
   const base = ek.resumen.delCruce;
-  const sit = ek.porSituacionDetalle;
+  const sit = ek.porSituacionDetalle ?? [];
   const principales = sit.slice(0, 3);
   const resto = sit.slice(3).reduce((n, x) => n + x.cantidad, 0);
   return (

@@ -191,6 +191,7 @@ test('estadoPlanillaDe: normaliza el estado de la planilla', () => {
   assert.strictEqual(N.estadoPlanillaDe('PLAZO'), 'Plazo');
   assert.strictEqual(N.estadoPlanillaDe('NOTIFICADO'), 'Notificado');
   assert.strictEqual(N.estadoPlanillaDe('otra cosa'), '');
+  assert.strictEqual(N.estadoPlanillaDe('Plazo vencido – pasó a acta'), ''); // texto libre del listado de plazos: no es un estado de la planilla
 });
 
 test('"Dio cumplimiento" cuenta como presentó documentación, también en lo ya cargado', () => {
