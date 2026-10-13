@@ -1,11 +1,11 @@
 const router = require('express').Router();
-const { Infraccion, Inspector, MotivoInfraccion, Estado, Oficina, Edificio } = require('../models');
+const { Infraccion, Notificacion, Inspector, MotivoInfraccion, Estado, Oficina, Edificio } = require('../models');
 const { protect, permitir, audit } = require('../middleware/auth');
 const { campanaDe, buscarOCrearEdificio, escapar, sincronizarInspeccion } = require('../services/edificios');
 const { normalizarCalle } = require('../services/direcciones');
 const { validarDatos, validarPase, puedePasar, esEditable, esCerrada, numeroExpedienteAuto } = require('../services/infracciones');
 const { procesarPendientes } = require('../services/geocodificador');
-const { calcularKpis } = require('../services/kpis');
+const { calcularKpis, calcularKpisDefensaCivil } = require('../services/kpis');
 
 router.use(protect);
 
@@ -90,6 +90,24 @@ router.get('/kpis', async (req, res) => {
     Edificio.countDocuments({ campana }),
   ]);
   res.json(calcularKpis(infracciones, { totalEdificios }));
+});
+
+// Indicadores de Defensa Civil: actuaciones, tipologías y normativa (acepta fechaDesde / fechaHasta para las actas)
+router.get('/kpis-dc', async (req, res) => {
+  const q = req.query;
+  const campana = await campanaDe(req);
+  const f = { eliminado: false };
+  if (q.fechaDesde || q.fechaHasta) {
+    f.fechaInfraccion = {};
+    if (q.fechaDesde) f.fechaInfraccion.$gte = new Date(`${q.fechaDesde}T00:00:00.000Z`);
+    if (q.fechaHasta) f.fechaInfraccion.$lte = new Date(`${q.fechaHasta}T23:59:59.999Z`);
+  }
+  const ids = (await Edificio.find({ campana }, '_id').lean()).map((e) => e._id);
+  const [infracciones, notificaciones] = await Promise.all([
+    Infraccion.find({ ...f, edificio: { $in: ids } }, 'edificio motivosInfraccion normativa').populate('motivosInfraccion', 'nombre').lean(),
+    Notificacion.find({ edificio: { $in: ids } }, 'edificio estadoPlanilla resultado fechaVencimiento').lean(),
+  ]);
+  res.json(calcularKpisDefensaCivil(infracciones, notificaciones));
 });
 
 router.get('/:id', async (req, res) => {

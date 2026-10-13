@@ -172,6 +172,16 @@ function responder(url: string, params: Record<string, string> = {}): unknown {
     const l = NOTIFICACIONES.filter((n) => (!params.estadoPlazo || n.estadoPlazo === params.estadoPlazo) && (!params.search || n.edificio.direccionOriginal.toLowerCase().includes(String(params.search).toLowerCase())));
     return { total: l.length, page, limit, items: l.slice((page - 1) * limit, page * limit) };
   }
+  if (u === '/infracciones/kpis-dc') {
+    const total = INFRACCIONES.length;
+    const eds = new Set(INFRACCIONES.map((i) => i.edificio.direccionOriginal));
+    return {
+      resumen: { edificiosAlcanzados: eds.size, actuaciones: total, notificaciones: 0, infracciones: total, edificiosConInfracciones: eds.size },
+      porTipoActuacion: [{ nombre: 'Infracciones', cantidad: eds.size, porcentaje: 100 }, { nombre: 'Notificaciones', cantidad: 0, porcentaje: 0 }, { nombre: 'Notificaciones + Infracciones', cantidad: 0, porcentaje: 0 }],
+      estadoNotificaciones: [], porTipologia: kpis().porMotivo, edificiosPorTipologia: kpis().porMotivo,
+      porNormativa: [], edificiosPorCantidad: [{ nombre: '1 infracción', cantidad: eds.size }],
+    };
+  }
   if (u === '/infracciones/kpis') return kpis();
   if (u === '/infracciones') {
     const page = Number(params.page) || 1, limit = Number(params.limit) || 25;

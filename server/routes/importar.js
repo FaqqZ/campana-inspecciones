@@ -278,7 +278,7 @@ router.post('/notificados/confirmar', permitir('importar'), subir, async (req, r
   const campos = (r) => ({
     fechaNotificacion: r.data.fechaNotificacion, plazoDias: r.data.plazoDias, fechaVencimiento: r.data.fechaVencimiento, observaciones: r.data.observaciones,
     boleta: r.data.boleta, razonSocial: r.data.razonSocial, inspector: r.data.inspector, plazoOriginal: r.data.plazoOriginal,
-    vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado,
+    vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado, estadoPlanilla: r.data.estadoPlanilla,
   });
   const completar = validas.filter((r) => r.data.actualiza);
   for (const r of completar) await Notificacion.updateOne({ _id: r.data.actualiza }, campos(r));
@@ -286,7 +286,7 @@ router.post('/notificados/confirmar', permitir('importar'), subir, async (req, r
     edificio: r.data.edificio, fechaNotificacion: r.data.fechaNotificacion, plazoDias: r.data.plazoDias,
     fechaVencimiento: r.data.fechaVencimiento, observaciones: r.data.observaciones,
     boleta: r.data.boleta, razonSocial: r.data.razonSocial, inspector: r.data.inspector, plazoOriginal: r.data.plazoOriginal,
-    vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id,
+    vencimientoOriginal: r.data.vencimientoOriginal, prorroga: r.data.prorroga, resultado: r.data.resultado, estadoPlanilla: r.data.estadoPlanilla, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id,
   })), { ordered: false });
   audit('importar', 'Notificacion', lote, req.user, `${validas.length} notificaciones, ${creados.length} edificios nuevos`);
   if (creados.length) procesarPendientes({ campana });

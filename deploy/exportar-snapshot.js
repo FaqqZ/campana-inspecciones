@@ -60,6 +60,7 @@ const paginar = async (url, limit, params = {}) => {
     kpisEdificios: await get('/edificios/kpis'),
     kpisNotificaciones: await get('/notificaciones/kpis'),
     kpisInfracciones: await get('/infracciones/kpis'),
+    kpisDefensaCivil: await get('/infracciones/kpis-dc'),
   };
   const destino = path.join(__dirname, '..', 'client', 'public', 'snapshot.json');
   fs.mkdirSync(path.dirname(destino), { recursive: true });

@@ -175,6 +175,7 @@ const notificacionSchema = new Schema(
     vencimientoOriginal: { type: Date, default: null }, // antes de las prórrogas; fechaVencimiento es el vigente
     prorroga: { type: Boolean, default: false },
     resultado: { type: String, enum: ['', 'presento', 'acta'], default: '' }, // presentó documentación / pasó a acta
+    estadoPlanilla: { type: String, default: '', trim: true }, // estado tal como lo normaliza la planilla: Para infracción / Notificado / Plazo / Dio cumplimiento
     origen: { type: String, enum: ['excel', 'manual'], default: 'manual' },
     lotImportacion: { type: String, index: true },
     creadoPor: { type: ObjectId, ref: 'User' },

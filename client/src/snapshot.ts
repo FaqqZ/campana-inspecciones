@@ -48,6 +48,7 @@ function responder(d: any, url: string, p: P): unknown {
       (!p.search || norm(`${n.edificio?.direccionOriginal} ${n.observaciones}`).includes(norm(p.search))));
     return pagina(l, p, 25, 200);
   }
+  if (u === '/infracciones/kpis-dc') return d.kpisDefensaCivil;
   if (u === '/infracciones/kpis') return d.kpisInfracciones;
   if (u === '/infracciones') {
     const l = d.infracciones.filter((i: any) =>

@@ -101,6 +101,32 @@ function situacionCatastro(e) {
 }
 
 /**
+ * Desglose completo de la situación según Catastro (excluyente: cada edificio en una sola categoría, sin "otras").
+ * Prioridad: denegada > conforme a obra sin terminar > terminado y habitado > el resto, por lo que dice el estado de obra.
+ */
+const SITUACIONES_DETALLE = [
+  'Terminados y habitados',
+  'Resolución denegatoria de permiso',
+  'Conforme a obra, sin terminar la tramitación',
+  'Con permiso, sin final de obra',
+  'Obra construida',
+  'Paralizada o en construcción',
+  'No construida, desistida o reemplazada',
+  'A verificar o sin dato',
+];
+function situacionDetalle(e) {
+  const t = quitarTildes(e.estadoObra).toLowerCase();
+  if (/denegad/.test(t)) return SITUACIONES_DETALLE[1];
+  if (/conforme a obra/.test(t) && /inconclu/.test(t)) return SITUACIONES_DETALLE[2];
+  if (/terminad/.test(t)) return SITUACIONES_DETALLE[0];
+  if (/con permiso sin final/.test(t)) return SITUACIONES_DETALLE[3];
+  if (/obra construida/.test(t)) return SITUACIONES_DETALLE[4];
+  if (/paralizad|en construccion/.test(t)) return SITUACIONES_DETALLE[5];
+  if (/no se construyo|no iniciada|desistid|reemplazad/.test(t)) return SITUACIONES_DETALLE[6];
+  return SITUACIONES_DETALLE[7];
+}
+
+/**
  * Indicadores de los edificios y del cruce Catastro / Defensa Civil (no dependen del período de las infracciones).
  * edificios: [{ _id, calle, padron, estadoObra, conclusionCruce, enListadoSinCert, mismaCalleOtraAltura, geoEstado, estadoInspeccion }]
  * ctx: { conCertificado:Set(id), semaforos:Map(id->semaforo), actasAbiertas:Map(id->cantidad), actasTotales:Map(id->cantidad) }
@@ -133,6 +159,10 @@ function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforo
       const del = edificios.filter((e) => situacionCatastro(e) === nombre);
       return { nombre, cantidad: del.length };
     }),
+    porSituacionDetalle: SITUACIONES_DETALLE.map((nombre) => {
+      const del = delCruce.filter((e) => situacionDetalle(e) === nombre);
+      return { nombre, cantidad: del.length, conCertificado: del.filter(cert).length };
+    }),
     porEstadoObra: contar(edificios, (e) => (e.estadoObra ? e.estadoObra.replace(/\s+/g, ' ').trim() : 'Sin dato de Catastro'), 10),
     porSemaforo: contar(edificios, (e) => ({ vigente: 'Al día', por_vencer: 'Por vencer', vencido: 'Vencido', faltante: 'Falta certificado', sin_relevar: 'Sin relevar' })[semaforos.get(id(e))] || 'Sin relevar'),
     porInspeccion: contar(edificios, (e) => ({ pendiente: 'Pendiente', inspeccionado: 'Inspeccionado', observado: 'Observado', regularizado: 'Regularizado' })[e.estadoInspeccion] || e.estadoInspeccion),
@@ -141,4 +171,131 @@ function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforo
   };
 }
 
-module.exports = { calcularKpis, calcularKpisEdificios, sinFinalDeObra, situacionCatastro, SITUACIONES, lunesDe };
+const { MOTIVOS } = require('./actas');
+
+const TIPOLOGIA_MULTIPLE = 'Elementos de seguridad contra incendios – múltiples';
+const TIPOLOGIA_POR_MOTIVO = {
+  [MOTIVOS.venc]: 'Extintores',
+  [MOTIVOS.extintores]: 'Extintores',
+  [MOTIVOS.red]: 'Red contra incendios (nichos/mangueras/lanzas/picos/bocas)',
+  [MOTIVOS.luces]: 'Luces de emergencia',
+  [MOTIVOS.balizas]: 'Balizas / señalización',
+  [MOTIVOS.noPermite]: 'Impedimento de inspección',
+  [MOTIVOS.boleta]: 'Incumplimiento de intimación previa',
+  [MOTIVOS.documentacion]: 'Documentación técnica',
+  [MOTIVOS.otros]: 'Otros motivos',
+};
+
+/** Tipología (excluyente) de un acta según sus motivos: si reúne más de una, es "múltiples". */
+function tipologiaDeActa(motivos = []) {
+  const t = [...new Set(motivos.map((m) => TIPOLOGIA_POR_MOTIVO[m?.nombre ?? m]).filter(Boolean))];
+  if (!t.length) return TIPOLOGIA_POR_MOTIVO[MOTIVOS.otros];
+  return t.length > 1 ? TIPOLOGIA_MULTIPLE : t[0];
+}
+
+/**
+ * Normativas que se citan en las actas, con la obligación a la que refiere cada una. Un mismo texto puede venir escrito de
+ * varias formas ("Ord.756/97- Art N° 3", "Dto. 756/97 - Art 3."): se unifican en una sola entrada.
+ */
+const NORMATIVAS = {
+  '756/97|3': { nombre: 'Dto. 756/97 - Art. 3', detalle: 'Extintores vencidos' },
+  '251/74|3': { nombre: 'Ord. 251/74 - Art. 3', detalle: 'No presentar la documentación técnica' },
+  '251/74|4': { nombre: 'Ord. 251/74 - Art. 4', detalle: 'Falta de extintores' },
+  '251/74|6': { nombre: 'Ord. 251/74 - Art. 6', detalle: 'Red contra incendios incompleta (nichos, mangueras, lanzas, picos y bocas)' },
+  '2119/93|3': { nombre: 'Ord. 2119/93 - Art. 3', detalle: 'Falta de luces de emergencia' },
+  '250/74|2': { nombre: 'Ord. 250/74 - Arts. 2 y 3', detalle: 'Incumplimiento de la boleta de notificación (intimación previa)' },
+  '250/74|3': { nombre: 'Ord. 250/74 - Arts. 2 y 3', detalle: 'Incumplimiento de la boleta de notificación (intimación previa)' },
+  '539/80|1': { nombre: 'Ord. 539/80 - Art. 1', detalle: 'Falta de balizas y señalización' },
+  '229/77|27': { nombre: 'Ord. 229/77 - Art. 27', detalle: 'Impedimento de la inspección' },
+  '229/77|': { nombre: 'Ord. 229/77 - Art. 27', detalle: 'Impedimento de la inspección' },
+};
+
+/** Normativas citadas en el texto de un acta (varias separadas por "|"), sin repetir. Devuelve [{ nombre, detalle }]. */
+function normativasDeActa(texto) {
+  const out = new Map();
+  String(texto || '').split('|').forEach((parte) => {
+    const m = parte.match(/(ord|dto|decreto|ordenanza)[a-z]*\.?\s*(?:n[°º]?\s*)?(\d+\/\d+)(?:[^0-9]*?art[a-z]*\.?\s*(?:n[°º]?\s*)?(\d+))?/i);
+    if (!m) { const t = parte.replace(/\s+/g, ' ').trim(); if (t) out.set(t, { nombre: t, detalle: '' }); return; }
+    const conocida = NORMATIVAS[`${m[2]}|${m[3] || ''}`];
+    const nombre = `${/^d/i.test(m[1]) ? 'Dto.' : 'Ord.'} ${m[2]}${m[3] ? ` - Art. ${m[3]}` : ''}`;
+    const n = conocida || { nombre, detalle: '' };
+    out.set(n.nombre, n);
+  });
+  return [...out.values()];
+}
+
+/** Cuenta las actas por normativa, con el detalle de cada una. */
+function contarNormativas(infracciones) {
+  const m = new Map();
+  infracciones.forEach((i) => normativasDeActa(i.normativa).forEach((n) => {
+    if (!m.has(n.nombre)) m.set(n.nombre, { ...n, cantidad: 0 });
+    m.get(n.nombre).cantidad++;
+  }));
+  return [...m.values()].sort((x, y) => y.cantidad - x.cantidad || x.nombre.localeCompare(y.nombre));
+}
+
+const ESTADOS_PLANILLA = ['Para infracción', 'Notificado', 'Plazo', 'Dio cumplimiento'];
+
+/**
+ * Indicadores de Defensa Civil. Edificios alcanzados = edificios notificados; las actuaciones son notificaciones + actas.
+ * infracciones: [{ edificio:{_id}, motivosInfraccion:[{nombre}], normativa }]
+ * notificaciones: [{ edificio:{_id}|id, estadoPlanilla, resultado, fechaVencimiento }]
+ */
+function calcularKpisDefensaCivil(infracciones, notificaciones = [], { hoy = new Date() } = {}) {
+  const idDe = (x) => String(x.edificio?._id ?? x.edificio);
+  const conActa = new Set(infracciones.map(idDe));
+  const conNotif = new Set(notificaciones.map(idDe));
+  const soloActa = [...conActa].filter((id) => !conNotif.has(id)).length;
+  const soloNotif = [...conNotif].filter((id) => !conActa.has(id)).length;
+  const ambos = [...conActa].filter((id) => conNotif.has(id)).length;
+  const dePorcentaje = (n, d) => (d ? Math.round((n / d) * 100) : 0);
+
+  const tipologias = infracciones.map((i) => ({ id: idDe(i), tipologia: tipologiaDeActa(i.motivosInfraccion) }));
+  const edificiosPorTipologia = new Map();
+  tipologias.forEach(({ id, tipologia }) => {
+    if (!edificiosPorTipologia.has(tipologia)) edificiosPorTipologia.set(tipologia, new Set());
+    edificiosPorTipologia.get(tipologia).add(id);
+  });
+  const porEdificio = new Map();
+  infracciones.forEach((i) => porEdificio.set(idDe(i), (porEdificio.get(idDe(i)) || 0) + 1));
+  const cantidades = [...porEdificio.values()];
+  const conCantidad = (min, max) => cantidades.filter((c) => c >= min && c <= max).length;
+
+  const estadoDeNotificacion = (n) => {
+    if (n.estadoPlanilla) return n.estadoPlanilla;
+    if (n.resultado === 'acta') return 'Para infracción';
+    if (n.resultado === 'presento') return 'Dio cumplimiento';
+    return n.fechaVencimiento && new Date(n.fechaVencimiento) >= hoy ? 'Plazo' : 'Notificado';
+  };
+
+  return {
+    resumen: {
+      edificiosAlcanzados: conNotif.size,
+      actuaciones: notificaciones.length + infracciones.length,
+      notificaciones: notificaciones.length,
+      infracciones: infracciones.length,
+      edificiosConInfracciones: conActa.size,
+      edificiosNotificados: conNotif.size,
+      edificiosConAmbas: ambos,
+      soloInfraccion: soloActa,
+      soloNotificacion: soloNotif,
+    },
+    // Universo: edificios alcanzados = edificios notificados. Los edificios con infracción y sin notificación registrada se informan aparte.
+    porTipoActuacion: [
+      { nombre: 'Solo notificación', cantidad: soloNotif, porcentaje: dePorcentaje(soloNotif, conNotif.size) },
+      { nombre: 'Notificación + infracción', cantidad: ambos, porcentaje: dePorcentaje(ambos, conNotif.size) },
+    ],
+    estadoNotificaciones: ESTADOS_PLANILLA.map((nombre) => ({ nombre, cantidad: notificaciones.filter((n) => estadoDeNotificacion(n) === nombre).length })),
+    porTipologia: contar(tipologias, (t) => t.tipologia),
+    edificiosPorTipologia: [...edificiosPorTipologia].map(([nombre, ids]) => ({ nombre, cantidad: ids.size })).sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre)),
+    porNormativa: contarNormativas(infracciones),
+    edificiosPorCantidad: [
+      { nombre: '1 infracción', cantidad: conCantidad(1, 1) },
+      { nombre: '2 infracciones', cantidad: conCantidad(2, 2) },
+      { nombre: '3 infracciones', cantidad: conCantidad(3, 3) },
+      { nombre: '4 o más infracciones', cantidad: conCantidad(4, Infinity) },
+    ],
+  };
+}
+
+module.exports = { calcularKpisDefensaCivil, tipologiaDeActa, normativasDeActa, calcularKpis, calcularKpisEdificios, sinFinalDeObra, situacionCatastro, situacionDetalle, SITUACIONES_DETALLE, SITUACIONES, lunesDe };

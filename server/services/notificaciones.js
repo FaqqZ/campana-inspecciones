@@ -46,8 +46,21 @@ function parsePlazo(v) {
 /** Resultado que informa la planilla: presentó documentación / pasó a acta ('' si sigue su curso). */
 function resultadoDe(estado) {
   const t = norm(estado);
-  if (/present\w* document/.test(t)) return 'presento';
+  if (/present\w* document|dio cumplimiento/.test(t)) return 'presento';
   if (/paso a acta/.test(t)) return 'acta';
+  return '';
+}
+
+/** Resultado de la notificación: el guardado o, en las cargadas antes, el que surge del estado de la planilla ("Dio cumplimiento" = presentó documentación). */
+const resultadoEfectivo = (n) => n.resultado || (n.estadoPlanilla === 'Dio cumplimiento' ? 'presento' : '');
+
+/** Estado de la planilla normalizado ('' si no es uno de los cuatro conocidos). */
+function estadoPlanillaDe(estado) {
+  const t = norm(estado);
+  if (/para infraccion/.test(t)) return 'Para infracción';
+  if (/dio cumplimiento/.test(t)) return 'Dio cumplimiento';
+  if (/^plazo/.test(t)) return 'Plazo';
+  if (/^notificad/.test(t)) return 'Notificado';
   return '';
 }
 
@@ -190,6 +203,7 @@ function validarNotificados(filas, ctx) {
       vencimientoOriginal: original || null,
       prorroga: Boolean(original && fechaVencimiento && claveDia(original) !== claveDia(fechaVencimiento)) || /prorroga/.test(norm(raw.estado)),
       resultado,
+      estadoPlanilla: estadoPlanillaDe(raw.estado),
       plazoOriginal: limpiar(raw.plazo),
       boleta: limpiar(raw.boleta),
       razonSocial: limpiar(raw.razon),
@@ -217,7 +231,7 @@ function vigentesPorEdificio(notificaciones) {
  */
 function calcularKpisNotificaciones(notificaciones, hoy = new Date()) {
   const vigentes = [...vigentesPorEdificio(notificaciones).values()];
-  const con = vigentes.map((n) => ({ n, estado: estadoPlazo(n.fechaVencimiento, hoy, n.resultado), dias: diasRestantes(n.fechaVencimiento, hoy) }));
+  const con = vigentes.map((n) => ({ n, estado: estadoPlazo(n.fechaVencimiento, hoy, resultadoEfectivo(n)), dias: diasRestantes(n.fechaVencimiento, hoy) }));
   const cuenta = (e) => con.filter((x) => x.estado === e).length;
   const contar = (clave, limite) => {
     const m = new Map();
@@ -237,8 +251,8 @@ function calcularKpisNotificaciones(notificaciones, hoy = new Date()) {
       pasaronAActa: cuenta('acta'),
       sinPlazo: cuenta('sin_plazo'),
       conProrroga: con.filter((x) => x.n.prorroga).length,
-      vencenEn7: con.filter((x) => !x.n.resultado && x.dias !== null && x.dias >= 0 && x.dias <= 7).length,
-      vencenEn30: con.filter((x) => !x.n.resultado && x.dias !== null && x.dias >= 0 && x.dias <= 30).length,
+      vencenEn7: con.filter((x) => !resultadoEfectivo(x.n) && x.dias !== null && x.dias >= 0 && x.dias <= 7).length,
+      vencenEn30: con.filter((x) => !resultadoEfectivo(x.n) && x.dias !== null && x.dias >= 0 && x.dias <= 30).length,
       plazoPromedio: con.filter((x) => x.n.plazoDias).length ? Math.round(con.reduce((a, x) => a + (x.n.plazoDias || 0), 0) / con.filter((x) => x.n.plazoDias).length) : 0,
     },
     porEstado: [
@@ -255,6 +269,6 @@ function calcularKpisNotificaciones(notificaciones, hoy = new Date()) {
 }
 
 module.exports = {
-  resultadoDe, DIAS_POR_VENCER_NOTIF, ESTADOS_PLAZO, vencimiento, diasRestantes, estadoPlazo, parsePlazo,
+  resultadoDe, resultadoEfectivo, estadoPlanillaDe, DIAS_POR_VENCER_NOTIF, ESTADOS_PLAZO, vencimiento, diasRestantes, estadoPlazo, parsePlazo,
   filasDeNotificados, leerNotificados, validarNotificados, vigentesPorEdificio, calcularKpisNotificaciones,
 };

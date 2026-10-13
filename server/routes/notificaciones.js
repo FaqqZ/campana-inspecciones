@@ -2,7 +2,7 @@ const router = require('express').Router();
 const { Notificacion, Edificio } = require('../models');
 const { protect, permitir, audit } = require('../middleware/auth');
 const { campanaDe, escapar } = require('../services/edificios');
-const { vencimiento, estadoPlazo, diasRestantes, parsePlazo, vigentesPorEdificio, calcularKpisNotificaciones } = require('../services/notificaciones');
+const { vencimiento, estadoPlazo, diasRestantes, parsePlazo, vigentesPorEdificio, calcularKpisNotificaciones, resultadoEfectivo } = require('../services/notificaciones');
 
 router.use(protect);
 
@@ -14,7 +14,7 @@ function enriquecer(lista, hoy = new Date()) {
   const vigentes = vigentesPorEdificio(lista);
   return lista.map((n) => ({
     ...n,
-    estadoPlazo: estadoPlazo(n.fechaVencimiento, hoy, n.resultado),
+    estadoPlazo: estadoPlazo(n.fechaVencimiento, hoy, resultadoEfectivo(n)),
     diasRestantes: diasRestantes(n.fechaVencimiento, hoy),
     vigente: vigentes.get(String(n.edificio?._id || n.edificio)) === n,
   }));

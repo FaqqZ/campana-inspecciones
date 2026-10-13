@@ -184,3 +184,24 @@ test('una notificación cargada sin plazo se completa con el listado de plazos',
   const [s] = N.validarNotificados([fila({ plazo: '', fecha: '01/09/2026' })], ctx({ existentes: ex }));
   assert.match(s.errores.join(), /Ya hay una notificación/);
 });
+
+test('estadoPlanillaDe: normaliza el estado de la planilla', () => {
+  assert.strictEqual(N.estadoPlanillaDe('PARA INFRACCION'), 'Para infracción');
+  assert.strictEqual(N.estadoPlanillaDe('DIO CUMPLIMIENTO'), 'Dio cumplimiento');
+  assert.strictEqual(N.estadoPlanillaDe('PLAZO'), 'Plazo');
+  assert.strictEqual(N.estadoPlanillaDe('NOTIFICADO'), 'Notificado');
+  assert.strictEqual(N.estadoPlanillaDe('otra cosa'), '');
+});
+
+test('"Dio cumplimiento" cuenta como presentó documentación, también en lo ya cargado', () => {
+  assert.strictEqual(N.resultadoDe('DIO CUMPLIMIENTO'), 'presento');
+  assert.strictEqual(N.resultadoDe('PARA INFRACCION'), '');
+  const hoy = new Date('2026-10-13T12:00:00Z');
+  const viejas = [
+    { edificio: 'a', fechaNotificacion: '2026-09-01', fechaVencimiento: '2026-09-10', resultado: '', estadoPlanilla: 'Dio cumplimiento' },
+    { edificio: 'b', fechaNotificacion: '2026-09-01', fechaVencimiento: '2026-09-10', resultado: '', estadoPlanilla: 'Notificado' },
+  ];
+  const k = N.calcularKpisNotificaciones(viejas, hoy);
+  assert.strictEqual(k.resumen.presentaron, 1);
+  assert.strictEqual(k.resumen.vencidos, 1);
+});

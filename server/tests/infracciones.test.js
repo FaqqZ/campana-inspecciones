@@ -127,3 +127,60 @@ test('situación según Catastro: denegada > conforme inconcluso > terminado y h
   assert.equal(s('CON PERMISO SIN FINAL A VERIFICAR CONSTRUCCION'), SITUACIONES.otras);
   assert.equal(s(''), SITUACIONES.sinDato);
 });
+
+test('kpis de Defensa Civil: edificios por tipo de actuación, tipologías y normativa', () => {
+  const { calcularKpisDefensaCivil, tipologiaDeActa, normativasDeActa } = require('../services/kpis');
+  const m = (...n) => n.map((nombre) => ({ nombre }));
+  const infr = [
+    { edificio: 'a', motivosInfraccion: m('Extintor vencido'), normativa: 'Dto.756/97- Art N° 3' },
+    { edificio: 'a', motivosInfraccion: m('Faltan luces de emergencia'), normativa: 'Ord.2119/93 - Art 3.' },
+    { edificio: 'b', motivosInfraccion: m('Falta de extintores', 'Faltan balizas'), normativa: 'Ord.251/74- Art 6.' },
+  ];
+  const notif = [
+    { edificio: 'b', estadoPlanilla: 'Para infracción' },
+    { edificio: 'c', estadoPlanilla: 'Plazo' },
+    { edificio: 'c', resultado: 'presento' },
+  ];
+  const k = calcularKpisDefensaCivil(infr, notif);
+  assert.deepEqual(k.resumen, { edificiosAlcanzados: 2, actuaciones: 6, notificaciones: 3, infracciones: 3, edificiosConInfracciones: 2, edificiosNotificados: 2, edificiosConAmbas: 1, soloInfraccion: 1, soloNotificacion: 1 });
+  // alcanzados = edificios notificados; los notificados se reparten en solo notificación / notificación + infracción
+  assert.equal(k.resumen.edificiosAlcanzados, k.resumen.edificiosNotificados);
+  assert.deepEqual(k.porTipoActuacion.map((x) => x.cantidad), [1, 1]);
+  assert.equal(k.porTipoActuacion.reduce((n, x) => n + x.cantidad, 0), k.resumen.edificiosAlcanzados);
+  assert.deepEqual(k.estadoNotificaciones.map((x) => x.cantidad), [1, 0, 1, 1]);
+  assert.equal(k.porTipologia.find((x) => x.nombre === 'Extintores').cantidad, 1);
+  assert.equal(k.porTipologia.find((x) => /múltiples/.test(x.nombre)).cantidad, 1);
+  assert.deepEqual(k.edificiosPorCantidad.map((x) => x.cantidad), [1, 1, 0, 0]);
+  assert.equal(k.porNormativa.find((x) => x.nombre === 'Dto. 756/97 - Art. 3').cantidad, 1);
+  assert.equal(k.porNormativa.find((x) => x.nombre === 'Dto. 756/97 - Art. 3').detalle, 'Extintores vencidos');
+  assert.equal(tipologiaDeActa([]), 'Otros motivos');
+  assert.deepEqual(normativasDeActa('Ord. 250/74-Art N° 2').map((n) => n.nombre), ['Ord. 250/74 - Arts. 2 y 3']);
+  assert.deepEqual(normativasDeActa('Ord. 229/77').map((n) => n.nombre), ['Ord. 229/77 - Art. 27']);
+  // formas distintas de escribir la misma norma se unifican (sin ítems repetidos)
+  const uni = calcularKpisDefensaCivil([
+    { edificio: 'a', motivosInfraccion: [], normativa: 'Ord.756/97- Art N° 3' },
+    { edificio: 'a', motivosInfraccion: [], normativa: 'Dto. 756/97 - Art 3.' },
+    { edificio: 'b', motivosInfraccion: [], normativa: 'Ord.250/74 - Art 2.' },
+    { edificio: 'b', motivosInfraccion: [], normativa: 'Ord.250/74 - Art 3.' },
+  ], []).porNormativa;
+  assert.deepEqual(uni.map((n) => [n.nombre, n.cantidad]), [['Dto. 756/97 - Art. 3', 2], ['Ord. 250/74 - Arts. 2 y 3', 2]]);
+  assert.ok(uni.every((n) => n.detalle));
+});
+
+test('situación según Catastro en detalle: cada edificio del cruce en una sola categoría', () => {
+  const { calcularKpisEdificios, situacionDetalle, SITUACIONES_DETALLE } = require('../services/kpis');
+  const d = (estadoObra) => situacionDetalle({ estadoObra });
+  assert.equal(d('TERMINADO HABITADO'), 'Terminados y habitados');
+  assert.equal(d('TERMINADO HABITADO CONFORME A OBRA DENEGADO'), 'Resolución denegatoria de permiso');
+  assert.equal(d('CONFORME A OBRA INCONCLUSO TERMINADO HABITADO?'), 'Conforme a obra, sin terminar la tramitación');
+  assert.equal(d('CON PERMISO SIN FINAL A VERIFICAR CONSTRUCCION'), 'Con permiso, sin final de obra');
+  assert.equal(d('OBRA CONSTRUIDA'), 'Obra construida');
+  assert.equal(d('PARALIZADA A VERIFICAR CONSTRUCCION'), 'Paralizada o en construcción');
+  assert.equal(d('NO SE CONSTRUYO A VERIFICAR CONSTRUCCION'), 'No construida, desistida o reemplazada');
+  assert.equal(d(''), 'A verificar o sin dato');
+  const eds = [{ _id: 1, padron: 'p', estadoObra: 'TERMINADO' }, { _id: 2, padron: 'p', estadoObra: 'OBRA CONSTRUIDA' }, { _id: 3, estadoObra: 'TERMINADO' }];
+  const k = calcularKpisEdificios(eds, { conCertificado: new Set(['1']) });
+  assert.equal(k.porSituacionDetalle.length, SITUACIONES_DETALLE.length);
+  assert.equal(k.porSituacionDetalle.reduce((n, x) => n + x.cantidad, 0), 2); // solo los del cruce (con padrón)
+  assert.deepEqual(k.porSituacionDetalle[0], { nombre: 'Terminados y habitados', cantidad: 1, conCertificado: 1 });
+});
