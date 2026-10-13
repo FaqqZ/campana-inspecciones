@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Box, CircularProgress, Container, Paper, Stack, Tab, Tabs, TextField, Tooltip, Typography, useTheme } from '@mui/material';
+import { Alert, Box, CircularProgress, Container, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, TextField, Tooltip, Typography, useTheme } from '@mui/material';
 import { api, errMsg } from '../api';
 
 interface Item { nombre: string; cantidad: number; detalle?: string }
@@ -11,6 +11,7 @@ interface KpisEdificios {
   };
   porSituacion: Item[];
   porSituacionDetalle: (Item & { conCertificado: number })[];
+  porEstadoCatastro: Item[];
   porEstadoObra: Item[]; porSemaforo: Item[]; porInspeccion: Item[]; porGeo: Item[]; sinCertPorCalle: Item[];
 }
 interface KpisDC {
@@ -261,6 +262,8 @@ function Catastro() {
   if (!ek) return <Box sx={{ p: 6, textAlign: 'center' }}><CircularProgress /></Box>;
   const base = ek.resumen.delCruce;
   const sit = ek.porSituacionDetalle ?? [];
+  const oficial = ek.porEstadoCatastro ?? [];
+  const totalOficial = oficial.reduce((n, x) => n + x.cantidad, 0);
   const principales = sit.slice(0, 3);
   const resto = sit.slice(3).reduce((n, x) => n + x.cantidad, 0);
   return (
@@ -281,6 +284,28 @@ function Catastro() {
             etiquetas={['Con certificado final', 'Sin certificado final']}
             items={sit.map((i) => ({ nombre: i.nombre, a: i.conCertificado, b: i.cantidad - i.conCertificado }))}
           />
+        </Panel>
+      </Stack>
+      <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
+        <Panel titulo="Estado de obra según Catastro" ancho={520}>
+        <Table size="small" sx={{ '& td, & th': { px: 1, py: 0.6 } }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 600 }}>Cantidad de edificios</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{num(totalOficial)}</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 600 }}>%</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {oficial.map((x) => (
+              <TableRow key={x.nombre} hover>
+                <TableCell sx={{ overflowWrap: 'anywhere' }}>{x.nombre}</TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{num(x.cantidad)}</TableCell>
+                <TableCell align="right" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{pct(x.cantidad, totalOficial)}%</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
         </Panel>
       </Stack>
     </Stack>

@@ -177,12 +177,16 @@ test('situación según Catastro en detalle: cada edificio del cruce en una sola
   assert.equal(d('TERMINADO HABITADO CONFORME A OBRA DENEGADO'), 'Resolución denegatoria de permiso');
   assert.equal(d('CONFORME A OBRA INCONCLUSO TERMINADO HABITADO?'), 'Conforme a obra, sin terminar la tramitación');
   assert.equal(d('CON PERMISO SIN FINAL A VERIFICAR CONSTRUCCION'), 'Con permiso, sin final de obra');
+  assert.equal(d('CON PERMISO A TERMINAR'), 'Con permiso, sin final de obra');
+  assert.equal(d('CON PERMISO REINICIO DE OBRA'), 'Con permiso, sin final de obra');
   assert.equal(d('OBRA CONSTRUIDA'), 'Obra construida');
   assert.equal(d('PARALIZADA A VERIFICAR CONSTRUCCION'), 'Paralizada o en construcción');
   assert.equal(d('NO SE CONSTRUYO A VERIFICAR CONSTRUCCION'), 'No construida, desistida o reemplazada');
   assert.equal(d(''), 'A verificar o sin dato');
   const eds = [{ _id: 1, padron: 'p', estadoObra: 'TERMINADO' }, { _id: 2, padron: 'p', estadoObra: 'OBRA CONSTRUIDA' }, { _id: 3, estadoObra: 'TERMINADO' }];
   const k = calcularKpisEdificios(eds, { conCertificado: new Set(['1']) });
+  // estados tal como los informa Catastro: un renglón por estado, solo del cruce, y suman el total del cruce
+  assert.deepEqual(k.porEstadoCatastro, [{ nombre: 'OBRA CONSTRUIDA', cantidad: 1 }, { nombre: 'TERMINADO', cantidad: 1 }]);
   assert.equal(k.porSituacionDetalle.length, SITUACIONES_DETALLE.length);
   assert.equal(k.porSituacionDetalle.reduce((n, x) => n + x.cantidad, 0), 2); // solo los del cruce (con padrón)
   assert.deepEqual(k.porSituacionDetalle[0], { nombre: 'Terminados y habitados', cantidad: 1, conCertificado: 1 });

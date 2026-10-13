@@ -119,7 +119,7 @@ function situacionDetalle(e) {
   if (/denegad/.test(t)) return SITUACIONES_DETALLE[1];
   if (/conforme a obra/.test(t) && /inconclu/.test(t)) return SITUACIONES_DETALLE[2];
   if (/terminad/.test(t)) return SITUACIONES_DETALLE[0];
-  if (/con permiso sin final/.test(t)) return SITUACIONES_DETALLE[3];
+  if (/con permiso (sin final|a terminar|reinicio)/.test(t)) return SITUACIONES_DETALLE[3];
   if (/obra construida/.test(t)) return SITUACIONES_DETALLE[4];
   if (/paralizad|en construccion/.test(t)) return SITUACIONES_DETALLE[5];
   if (/no se construyo|no iniciada|desistid|reemplazad/.test(t)) return SITUACIONES_DETALLE[6];
@@ -158,6 +158,17 @@ function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforo
       const del = edificios.filter((e) => situacionCatastro(e) === nombre);
       return { nombre, cantidad: del.length };
     }),
+    // Estados de obra tal como los informa Catastro (un renglón por estado, en orden alfabético), solo edificios del cruce
+    porEstadoCatastro: (() => {
+      const m = new Map();
+      delCruce.forEach((e) => {
+        const nombre = String(e.estadoObra || '').replace(/\s+/g, ' ').trim() || 'Sin dato de Catastro';
+        const k = quitarTildes(nombre).toUpperCase();
+        if (!m.has(k)) m.set(k, { nombre, cantidad: 0 });
+        m.get(k).cantidad++;
+      });
+      return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    })(),
     porSituacionDetalle: SITUACIONES_DETALLE.map((nombre) => {
       const del = delCruce.filter((e) => situacionDetalle(e) === nombre);
       return { nombre, cantidad: del.length, conCertificado: del.filter(cert).length };
