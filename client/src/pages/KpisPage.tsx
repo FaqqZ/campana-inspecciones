@@ -216,8 +216,8 @@ function DefensaCivil() {
       <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
         <Tile color={c[0]} titulo="Edificios alcanzados" valor={num(r.edificiosAlcanzados)} detalle="con notificación o acta (tabla maestra)" />
         <Tile color={c[1]} titulo="Actuaciones registradas" valor={num(r.actuaciones)} detalle="notificaciones + actas de infracción" />
-        <Tile color={c[2]} titulo="Notificaciones realizadas" valor={num(r.notificaciones)} detalle={`en ${num(r.edificiosNotificados)} edificios`} />
-        <Tile color={c[3]} titulo="Infracciones registradas" valor={num(r.infracciones)} detalle={`en ${num(r.edificiosConInfracciones)} edificios`} />
+        <Tile color={c[2]} titulo="Notificaciones realizadas" valor={num(r.notificaciones)} />
+        <Tile color={c[3]} titulo="Infracciones registradas" valor={num(r.infracciones)} />
       </Stack>
       <Typography variant="caption" color="text.secondary">
         Las actuaciones corresponden a registros administrativos: un mismo edificio puede registrar más de una. Se entiende por actuaciones tanto las notificaciones como las actas de infracción.
