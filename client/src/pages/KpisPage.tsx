@@ -5,7 +5,7 @@ import { api, errMsg } from '../api';
 interface Item { nombre: string; cantidad: number; detalle?: string }
 interface KpisEdificios {
   resumen: {
-    total: number; delCruce: number; creadosDesdeActas: number; conCertificado: number; pctCertificado: number; sinCertificado: number; sinRelevar: number;
+    total: number; delCruce: number; creadosDesdeActas: number; conCertificado: number; pctCertificado: number; sinCertificado: number;
     sinFinalCatastro: number; pctSinFinalCatastro: number;
     sinCertConActasAbiertas: number; sinCertSinActas: number; conActas: number; sinUbicar: number;
   };

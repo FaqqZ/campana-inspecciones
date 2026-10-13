@@ -50,12 +50,10 @@ const tiposActivos = () => TipoDocumento.find({ activo: true }).sort('orden nomb
 
 /** Map(edificioId -> semaforo) calculado con una sola consulta de documentos. */
 async function semaforosDe(ids) {
-  const [tipos, docs, conActas] = await Promise.all([
+  const [tipos, docs] = await Promise.all([
     tiposActivos(),
     DocumentoEdificio.find({ edificio: { $in: ids } }).lean(),
-    Infraccion.distinct('edificio', { edificio: { $in: ids }, eliminado: { $ne: true } }),
   ]);
-  const actas = new Set(conActas.map(String));
   const porEdificio = new Map();
   docs.forEach((d) => {
     const k = String(d.edificio);
@@ -63,7 +61,7 @@ async function semaforosDe(ids) {
     porEdificio.get(k).push(d);
   });
   const hoy = new Date();
-  return new Map(ids.map((id) => [String(id), evaluarEdificio(tipos, porEdificio.get(String(id)) || [], hoy, { conInfracciones: actas.has(String(id)) }).semaforo]));
+  return new Map(ids.map((id) => [String(id), evaluarEdificio(tipos, porEdificio.get(String(id)) || [], hoy).semaforo]));
 }
 
 /**

@@ -23,7 +23,7 @@ const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
 const EDIFICIOS = Array.from({ length: 48 }, (_, i) => {
   const calle = CALLES[i % CALLES.length];
   const numero = 100 + Math.floor(rnd() * 1800);
-  const semaforo = pick(['vigente', 'vigente', 'faltante', 'vencido', 'por_vencer', 'sin_relevar'] as const);
+  const semaforo = pick(['vigente', 'vigente', 'faltante', 'vencido', 'por_vencer'] as const);
   return {
     _id: `e${i}`, direccionOriginal: `${calle} ${numero}`, calle, numero,
     lat: -26.8241 + (rnd() - 0.5) * 0.03, lng: -65.2226 + (rnd() - 0.5) * 0.03,
@@ -132,7 +132,7 @@ function responder(url: string, params: Record<string, string> = {}): unknown {
     const e = EDIFICIOS.find((x) => x._id === ed[1])!;
     return {
       edificio: e, semaforo: e.semaforo, inspecciones: [], infraccionesPotenciales: [],
-      fotos: [], notificaciones: NOTIFICACIONES.filter((n) => n.edificio._id === e._id), documentos: [{ tipo: TIPOS[0], doc: null, estado: 'sin_relevar' }], infracciones: INFRACCIONES.filter((i) => i.edificio._id === e._id),
+      fotos: [], notificaciones: NOTIFICACIONES.filter((n) => n.edificio._id === e._id), documentos: [{ tipo: TIPOS[0], doc: null, estado: 'faltante' }], infracciones: INFRACCIONES.filter((i) => i.edificio._id === e._id),
     };
   }
   if (u === '/edificios/kpis') {
@@ -140,7 +140,7 @@ function responder(url: string, params: Record<string, string> = {}): unknown {
     const g = (xs: string[]) => agrupar(xs);
     return {
       resumen: { total: EDIFICIOS.length, delCruce: 36, creadosDesdeActas: 12, conCertificado: EDIFICIOS.length - sin.length, pctCertificado: Math.round(((EDIFICIOS.length - sin.length) / EDIFICIOS.length) * 100),
-        sinCertificado: sin.length, sinRelevar: 8, sinFinalCatastro: 20, pctSinFinalCatastro: 42, sinCertConActasAbiertas: 5, sinCertSinActas: 22, conActas: 30, sinUbicar: 2 },
+        sinCertificado: sin.length, sinFinalCatastro: 20, pctSinFinalCatastro: 42, sinCertConActasAbiertas: 5, sinCertSinActas: 22, conActas: 30, sinUbicar: 2 },
       porSituacion: [
         { nombre: 'Resolución denegada', cantidad: 3 },
         { nombre: 'Conforme a obra presentado, documentación sin terminar', cantidad: 9 },
@@ -149,7 +149,7 @@ function responder(url: string, params: Record<string, string> = {}): unknown {
         { nombre: 'Sin dato de Catastro', cantidad: 8 },
       ],
       porEstadoObra: [{ nombre: 'CON PERMISO SIN FINAL A VERIFICAR CONSTRUCCION', cantidad: 19 }, { nombre: 'TERMINADO HABITADO', cantidad: 11 }, { nombre: 'Sin dato de Catastro', cantidad: 8 }, { nombre: 'TERMINADO', cantidad: 6 }, { nombre: 'CONFORME A OBRA INCONCLUSO', cantidad: 4 }],
-      porSemaforo: g(EDIFICIOS.map((e) => ({ vigente: 'Al día', faltante: 'Falta certificado', sin_relevar: 'Sin relevar', vencido: 'Vencido', por_vencer: 'Por vencer' })[e.semaforo])),
+      porSemaforo: g(EDIFICIOS.map((e) => ({ vigente: 'Al día', faltante: 'Falta certificado', vencido: 'Vencido', por_vencer: 'Por vencer' })[e.semaforo])),
       porInspeccion: g(EDIFICIOS.map((e) => e.estadoInspeccion)), porGeo: [{ nombre: 'Ubicado', cantidad: EDIFICIOS.length - 2 }, { nombre: 'No se pudo ubicar', cantidad: 2 }],
       sinCertPorCalle: agrupar(sin.map((e) => e.calle), 8),
     };

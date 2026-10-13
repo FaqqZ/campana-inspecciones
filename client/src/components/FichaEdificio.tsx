@@ -171,7 +171,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
             <Typography variant="subtitle2">Posibles infracciones</Typography>
             {ficha.infraccionesPotenciales.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                {ficha.semaforo === 'sin_relevar' ? 'Todavía no se relevó la documentación de este edificio.' : 'No se detectan por la documentación cargada.'}
+                No se detectan por la documentación cargada.
               </Typography>
             ) : (
               <Stack spacing={0.8}>

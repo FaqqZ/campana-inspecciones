@@ -96,7 +96,7 @@ export default function MapaView({ puntos, claveFiltros, seleccionado, moviendo,
         <Marker
           key={`${seleccionado}-${moviendo}`}
           position={sel ? [sel.lat, sel.lng] : posSeleccionado!}
-          icon={icono(sel ? SEMAFORO[sel.semaforo].color : SEMAFORO.sin_relevar.color, true)}
+          icon={icono(sel ? SEMAFORO[sel.semaforo].color : '#78909c', true)}
           draggable={moviendo}
           zIndexOffset={1000}
           eventHandlers={{ dragend: (e) => { const ll = (e.target as L.Marker).getLatLng(); onMover(ll.lat, ll.lng); } }}

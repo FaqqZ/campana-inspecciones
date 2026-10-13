@@ -21,8 +21,8 @@ const tipos = [
   { _id: 'c', nombre: 'Extra C', requerido: false, tieneVencimiento: false, motivoAsociado: 'm3' },
 ];
 
-test('sin documentos cargados = sin_relevar', () => {
-  assert.strictEqual(evaluarEdificio(tipos, [], hoy).semaforo, 'sin_relevar');
+test('sin documentos cargados = faltante (ya no existe "sin relevar")', () => {
+  assert.strictEqual(evaluarEdificio(tipos, [], hoy).semaforo, 'faltante');
 });
 
 test('falta un requerido: semáforo faltante y posible infracción', () => {

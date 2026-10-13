@@ -104,7 +104,7 @@ test('kpis de edificios: certificado, final de obra de Catastro', () => {
   assert.strictEqual(sinFinalDeObra(edificios[2]), false);
   const k = calcularKpisEdificios(edificios, {
     conCertificado: new Set(['b']),
-    semaforos: new Map([['a', 'faltante'], ['b', 'vigente'], ['c', 'faltante'], ['d', 'sin_relevar']]),
+    semaforos: new Map([['a', 'faltante'], ['b', 'vigente'], ['c', 'faltante'], ['d', 'faltante']]),
     actasAbiertas: new Map([['a', 2]]), actasTotales: new Map([['a', 2]]),
   });
   assert.strictEqual(k.resumen.total, 4);
@@ -112,7 +112,7 @@ test('kpis de edificios: certificado, final de obra de Catastro', () => {
   assert.strictEqual(k.resumen.conCertificado, 1);
   assert.strictEqual(k.resumen.sinFinalCatastro, 2);
   assert.strictEqual(k.resumen.sinCertConActasAbiertas, 1);
-  assert.strictEqual(k.resumen.sinRelevar, 1);
+  assert.strictEqual(k.resumen.sinRelevar, undefined); // el estado "sin relevar" ya no existe
   assert.strictEqual(k.resumen.sinUbicar, 1);
 });
 

@@ -18,19 +18,15 @@ function estadoDocumento(doc, tipo, hoy = new Date()) {
 /**
  * Evalúa todos los tipos activos de un edificio.
  * Devuelve { semaforo, detalle:[{tipo, estado, doc}], infraccionesPotenciales:[...] }
- * semaforo: sin_relevar | faltante | vencido | por_vencer | vigente
- * conInfracciones: el edificio tiene actas, por lo que nunca es sin_relevar.
+ * semaforo: faltante | vencido | por_vencer | vigente (un edificio sin documentos cargados figura como faltante)
  * Los tipos no requeridos que faltan no empeoran el semáforo.
  */
-function evaluarEdificio(tipos, documentos, hoy = new Date(), { conInfracciones = false } = {}) {
+function evaluarEdificio(tipos, documentos, hoy = new Date()) {
   const porTipo = new Map(documentos.map((d) => [String(d.tipo), d]));
   const detalle = tipos.map((tipo) => {
     const doc = porTipo.get(String(tipo._id)) || null;
     return { tipo, doc, estado: estadoDocumento(doc, tipo, hoy) };
   });
-
-  // Un edificio con actas ya fue relevado por Defensa Civil: sin documentos cargados no está "sin relevar", le faltan los papeles.
-  if (!documentos.length && !conInfracciones) return { semaforo: 'sin_relevar', detalle, infraccionesPotenciales: [] };
 
   let peor = 'vigente';
   const infraccionesPotenciales = [];

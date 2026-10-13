@@ -25,7 +25,7 @@ router.get('/respaldo', async (req, res) => {
   actas.forEach((a) => actasDe.set(String(a.edificio), [...(actasDe.get(String(a.edificio)) || []), a]));
 
   const filas = edificios.map((e) => {
-    const ev = evaluarEdificio(tipos, docsDe.get(String(e._id)) || [], new Date(), { conInfracciones: (actasDe.get(String(e._id)) || []).length > 0 });
+    const ev = evaluarEdificio(tipos, docsDe.get(String(e._id)) || [], new Date());
     const fila = {
       Calle: e.calle,
       Número: e.numero || '',

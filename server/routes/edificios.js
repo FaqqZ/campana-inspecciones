@@ -170,7 +170,7 @@ router.get('/:id', async (req, res) => {
     FotoEdificio.find({ edificio: e._id }).sort('orden createdAt').select('nombreOriginal descripcion tipo').lean(),
     Notificacion.find({ edificio: e._id }).sort('-fechaNotificacion').lean(),
   ]);
-  const ev = evaluarEdificio(tipos, documentos, new Date(), { conInfracciones: infracciones.length > 0 });
+  const ev = evaluarEdificio(tipos, documentos, new Date());
   res.json({
     edificio: e,
     semaforo: ev.semaforo,

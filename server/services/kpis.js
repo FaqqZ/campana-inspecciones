@@ -138,7 +138,7 @@ function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforo
   const delCruce = edificios.filter((e) => e.padron);
   const sinFinal = edificios.filter(sinFinalDeObra);
   const pct = (n, d = total) => (d ? Math.round((n / d) * 100) : 0);
-  const sinCert = edificios.filter((e) => !cert(e) && (semaforos.get(id(e)) || '') !== 'sin_relevar');
+  const sinCert = edificios.filter((e) => !cert(e));
   return {
     resumen: {
       total,
@@ -147,7 +147,6 @@ function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforo
       conCertificado: edificios.filter(cert).length,
       pctCertificado: pct(edificios.filter(cert).length),
       sinCertificado: sinCert.length,
-      sinRelevar: edificios.filter((e) => (semaforos.get(id(e)) || '') === 'sin_relevar').length,
       sinFinalCatastro: sinFinal.length,
       pctSinFinalCatastro: pct(sinFinal.length),
       sinCertConActasAbiertas: sinCert.filter((e) => (actasAbiertas.get(id(e)) || 0) > 0).length,
@@ -164,7 +163,7 @@ function calcularKpisEdificios(edificios, { conCertificado = new Set(), semaforo
       return { nombre, cantidad: del.length, conCertificado: del.filter(cert).length };
     }),
     porEstadoObra: contar(edificios, (e) => (e.estadoObra ? e.estadoObra.replace(/\s+/g, ' ').trim() : 'Sin dato de Catastro'), 10),
-    porSemaforo: contar(edificios, (e) => ({ vigente: 'Al día', por_vencer: 'Por vencer', vencido: 'Vencido', faltante: 'Falta certificado', sin_relevar: 'Sin relevar' })[semaforos.get(id(e))] || 'Sin relevar'),
+    porSemaforo: contar(edificios, (e) => ({ vigente: 'Al día', por_vencer: 'Por vencer', vencido: 'Vencido', faltante: 'Falta certificado' })[semaforos.get(id(e))] || 'Falta certificado'),
     porInspeccion: contar(edificios, (e) => ({ pendiente: 'Pendiente', inspeccionado: 'Inspeccionado', observado: 'Observado', regularizado: 'Regularizado' })[e.estadoInspeccion] || e.estadoInspeccion),
     porGeo: contar(edificios, (e) => ({ ok: 'Ubicado', aproximado: 'Aproximado', manual: 'Manual', pendiente: 'Pendiente', fallido: 'No se pudo ubicar' })[e.geoEstado] || e.geoEstado),
     sinCertPorCalle: contar(sinCert, (e) => e.calle, 8),

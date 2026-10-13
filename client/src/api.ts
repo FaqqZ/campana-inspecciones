@@ -11,8 +11,8 @@ export interface Usuario {
   role: Rol;
 }
 
-export type Semaforo = 'vigente' | 'por_vencer' | 'vencido' | 'faltante' | 'sin_relevar';
-export type EstadoDoc = Exclude<Semaforo, 'sin_relevar'>;
+export type Semaforo = 'vigente' | 'por_vencer' | 'vencido' | 'faltante';
+export type EstadoDoc = Semaforo;
 export type GeoEstado = 'pendiente' | 'ok' | 'aproximado' | 'fallido' | 'manual';
 export type EstadoInspeccion = 'pendiente' | 'inspeccionado' | 'observado' | 'regularizado';
 

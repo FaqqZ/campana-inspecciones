@@ -6,7 +6,6 @@ export const SEMAFORO: Record<Semaforo, { label: string; color: string }> = {
   por_vencer: { label: 'Por vencer', color: '#f9a825' },
   vencido: { label: 'Vencido', color: '#e65100' },
   faltante: { label: 'Falta documentación', color: '#c62828' },
-  sin_relevar: { label: 'Sin relevar', color: '#78909c' },
 };
 
 export const GEO_LABEL: Record<GeoEstado, string> = {
