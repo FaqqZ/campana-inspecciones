@@ -32,3 +32,11 @@ export const PLAZO: Record<EstadoPlazo, { label: string; color: string }> = {
   acta: { label: 'Pasó a acta', color: '#6a1b9a' },
   sin_plazo: { label: 'Sin plazo registrado', color: '#546e7a' },
 };
+
+/** Categorías del mapa: una campaña por categoría. Todas se dibujan con su emoji. */
+export const CATEGORIAS = {
+  EDIFICIOS: { label: 'Edificios', emoji: '🏢', marcador: '🏢' },
+  COLEGIOS: { label: 'Colegios', emoji: '🏫', marcador: '🏫' },
+  BOLICHES: { label: 'Boliches', emoji: '🍸', marcador: '🍸' },
+} as const;
+export const TODAS_CATEGORIAS = Object.keys(CATEGORIAS) as (keyof typeof CATEGORIAS)[];

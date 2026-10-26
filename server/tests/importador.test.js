@@ -176,3 +176,68 @@ test('actas: una N final de una palabra con tilde no se toma como marcador de n�
   assert.strictEqual(parseDomicilio('Concepción 12').calle, 'Concepción');
   assert.strictEqual(parseDomicilio('Mendoza N°490').numero, 490);
 });
+
+test('edificios: la columna "Escuela / Colegio" se guarda como titular (nombre de la institución)', () => {
+  const r = validarFilas('edificios', [{ 'ID': 'COL-001', 'Escuela / Colegio': 'Colegio Salesiano G. Belgrano', 'Dirección': 'Chacabuco 369' }], { existentes: new Set() });
+  assert.deepStrictEqual(r[0].errores, []);
+  assert.strictEqual(r[0].data.titular, 'Colegio Salesiano G. Belgrano');
+  assert.strictEqual(r[0].data.direccionOriginal, 'Chacabuco 369');
+});
+
+test('boliches: ID, nombre y coordenadas; dos locales en la misma dirección conviven', () => {
+  const filas = [
+    { ID: 'BOL-1', 'BOLICHES/PUB/PEÑAS': 'Artaza', 'DIRECCIÓN': 'Rivadavia 1312', LATITUD: -26.81, LONGITUD: -65.19, 'OBSERVACIÓN': 'Aproximada' },
+    { ID: 'BOL-2', 'BOLICHES/PUB/PEÑAS': 'Cherry', 'DIRECCIÓN': 'Rivadavia 1312', LATITUD: -26.81, LONGITUD: -65.19 },
+    { ID: 'BOL-3', 'BOLICHES/PUB/PEÑAS': 'Black', 'DIRECCIÓN': 'ESPAÑA Y CATAMARCA', LATITUD: '-26,8159', LONGITUD: '-65,2090' },
+  ];
+  const r = validarFilas('edificios', filas, { existentes: new Set(), porNombre: true });
+  assert.deepStrictEqual(r.map((x) => x.errores), [[], [], []]);
+  assert.strictEqual(r[0].data.codigo, 'BOL-1');
+  assert.strictEqual(r[0].data.titular, 'Artaza');
+  assert.strictEqual(r[0].data.observaciones, 'Aproximada');
+  assert.strictEqual(r[0].data.geoEstado, 'ok');
+  assert.strictEqual(r[2].data.lat, -26.8159);
+  assert.notStrictEqual(r[0].data.direccionNorm, r[1].data.direccionNorm);
+});
+
+test('boliches: repetido en el archivo, ya existente y coordenadas inválidas', () => {
+  const base = { 'DIRECCIÓN': 'Mendoza 1084', LATITUD: -26.8, LONGITUD: -65.2 };
+  const r = validarFilas('edificios', [
+    { ...base, NOMBRE: 'La Miami' }, { ...base, NOMBRE: 'La Miami' },
+    { ...base, NOMBRE: 'Otro', LATITUD: 'abc' }, { ...base, NOMBRE: 'Solo lat', LONGITUD: '' },
+  ], { existentes: new Set(), porNombre: true });
+  assert.match(r[1].errores[0], /repetido/);
+  assert.match(r[2].errores[0], /Latitud y Longitud/);
+  assert.match(r[3].errores[0], /juntas/);
+  const ya = validarFilas('edificios', [{ ...base, NOMBRE: 'La Miami' }], { existentes: new Set([r[0].data.direccionNorm]), porNombre: true });
+  assert.match(ya[0].errores[0], /ya existe/);
+});
+
+test('edificios sin porNombre: sigue la dirección como clave y no usa coordenadas vacías', () => {
+  const r = validarFilas('edificios', [{ Calle: 'Mate de Luna', 'Número': 100 }], { existentes: new Set() });
+  assert.deepStrictEqual(r[0].errores, []);
+  assert.strictEqual(r[0].data.lat, undefined);
+  assert.ok(!r[0].data.direccionNorm.includes('|'));
+});
+
+test('edificios: Domicilio normalizado con rango y esquina; el existente solo se completa', () => {
+  const filas = [
+    { 'ID edificio': 'EDM001', 'Domicilio normalizado': 'Corrientes N° 570/590', 'Razón social': 'Consorcio X', Latitud: -26.82, Longitud: -65.2 },
+    { 'ID edificio': 'EDM002', 'Domicilio normalizado': '24 de Septiembre Esq. Aya', 'Razón social': 'Y' },
+    { 'ID edificio': 'EDM003', 'Domicilio normalizado': 'Mendoza N° 100', 'Razón social': 'Nuevo', Latitud: -26.83, Longitud: -65.21 },
+    { 'ID edificio': 'EDM004', 'Domicilio normalizado': 'Mendoza N° 200' },
+  ];
+  const existentes = new Map([
+    ['corrientes 570', { _id: 'a1', codigo: '', titular: 'Ya tenía titular', lat: null, lng: null }],
+    ['mendoza 200', { _id: 'a2', codigo: 'EDM004', titular: 'T', lat: -26.8, lng: -65.2 }],
+  ]);
+  const r = validarFilas('edificios', filas, { existentes });
+  assert.deepStrictEqual(r.map((x) => x.errores), [[], [], [], []]);
+  assert.strictEqual(r[0].data.actualiza, 'a1');
+  assert.deepStrictEqual(r[0].cambios, ['ID', 'coordenadas']); // el titular ya existente no se pisa
+  assert.strictEqual(r[0].data.set.titular, undefined);
+  assert.strictEqual(r[1].data.calleNorm, '24 de septiembre y aya');
+  assert.strictEqual(r[2].data.actualiza, undefined);
+  assert.strictEqual(r[2].data.titular, 'Nuevo');
+  assert.deepStrictEqual(r[3].cambios, []); // ya estaba al día
+});

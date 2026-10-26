@@ -1,8 +1,8 @@
 const router = require('express').Router();
 const XLSX = require('xlsx');
-const { Edificio, DocumentoEdificio, Infraccion, Notificacion, FotoEdificio, Inspeccion, AuditLog } = require('../models');
+const { CATEGORIAS, Campana, Edificio, DocumentoEdificio, Infraccion, Notificacion, FotoEdificio, Inspeccion, AuditLog } = require('../models');
 const { protect, authorize } = require('../middleware/auth');
-const { campanaDe, tiposActivos, sincronizarInspeccion } = require('../services/edificios');
+const { campanaDe, filtroCategoria, tiposActivos, sincronizarInspeccion } = require('../services/edificios');
 const fotosStore = require('../services/fotosStore');
 const { evaluarEdificio } = require('../services/semaforo');
 
@@ -57,41 +57,59 @@ router.get('/respaldo', async (req, res) => {
 // ---- Eliminar lo cargado (solo Administrador). Los catálogos, usuarios, campaña y auditoría no se tocan. ----
 const ALCANCES = ['todo', 'infracciones', 'notificaciones', 'fotos'];
 
+// Alcance de la eliminación: una categoría (EDIFICIOS / COLEGIOS / BOLICHES) o TODAS. Cada categoría es una campaña propia.
+// Devuelve null para TODAS (sin filtro) o el filtro por edificio de las campañas de esa categoría.
+async function alcanceDe(categoria) {
+  if (!categoria || categoria === 'TODAS') return { filtroEdificio: {}, filtroHijos: {}, todas: true };
+  if (!CATEGORIAS.includes(categoria)) return null;
+  const campanas = await Campana.find(filtroCategoria(categoria)).distinct('_id');
+  const ids = await Edificio.find({ campana: { $in: campanas } }).setOptions({ incluirOcultos: true }).distinct('_id');
+  return { filtroEdificio: { campana: { $in: campanas } }, filtroHijos: { edificio: { $in: ids } }, todas: false };
+}
+
 router.get('/datos', async (req, res) => {
-  const campana = await campanaDe(req);
+  const a = await alcanceDe(req.query.categoria);
+  if (!a) return res.status(400).json({ message: 'Categoría inválida' });
   const [edificios, infracciones, notificaciones, fotos] = await Promise.all([
-    Edificio.countDocuments({ campana }).setOptions({ incluirOcultos: true }),
-    Infraccion.countDocuments({}),
-    Notificacion.countDocuments({}),
-    FotoEdificio.countDocuments({}),
+    Edificio.countDocuments(a.filtroEdificio).setOptions({ incluirOcultos: true }),
+    Infraccion.countDocuments(a.filtroHijos),
+    Notificacion.countDocuments(a.filtroHijos),
+    FotoEdificio.countDocuments(a.filtroHijos),
   ]);
   res.json({ edificios, infracciones, notificaciones, fotos });
 });
 
 router.delete('/datos', async (req, res) => {
-  const { alcance, confirmar } = req.body || {};
+  const { alcance, confirmar, categoria } = req.body || {};
   if (!ALCANCES.includes(alcance)) return res.status(400).json({ message: 'Alcance inválido' });
   if (confirmar !== 'ELIMINAR') return res.status(400).json({ message: 'Escribí ELIMINAR para confirmar' });
+  const a = await alcanceDe(categoria);
+  if (!a) return res.status(400).json({ message: 'Categoría inválida' });
   const borrados = {};
   if (alcance === 'todo' || alcance === 'infracciones') {
-    borrados.infracciones = (await Infraccion.deleteMany({})).deletedCount;
+    borrados.infracciones = (await Infraccion.deleteMany(a.filtroHijos)).deletedCount;
   }
   if (alcance === 'todo' || alcance === 'notificaciones') {
-    borrados.notificaciones = (await Notificacion.deleteMany({})).deletedCount;
+    borrados.notificaciones = (await Notificacion.deleteMany(a.filtroHijos)).deletedCount;
   }
   if (alcance === 'todo' || alcance === 'fotos') {
-    borrados.fotos = (await FotoEdificio.deleteMany({})).deletedCount;
-    await fotosStore.borrarTodo();
+    if (a.todas) {
+      borrados.fotos = (await FotoEdificio.deleteMany({})).deletedCount;
+      await fotosStore.borrarTodo();
+    } else {
+      const fotos = await FotoEdificio.find(a.filtroHijos).lean();
+      for (const f of fotos) await fotosStore.borrar(f.edificio, f.archivo);
+      borrados.fotos = (await FotoEdificio.deleteMany(a.filtroHijos)).deletedCount;
+    }
   }
   if (alcance === 'todo') {
-    const campana = await campanaDe(req);
-    borrados.documentos = (await DocumentoEdificio.deleteMany({})).deletedCount;
-    borrados.inspecciones = (await Inspeccion.deleteMany({})).deletedCount;
-    borrados.edificios = (await Edificio.deleteMany({ campana })).deletedCount;
+    borrados.documentos = (await DocumentoEdificio.deleteMany(a.filtroHijos)).deletedCount;
+    borrados.inspecciones = (await Inspeccion.deleteMany(a.filtroHijos)).deletedCount;
+    borrados.edificios = (await Edificio.deleteMany(a.filtroEdificio).setOptions({ incluirOcultos: true })).deletedCount;
   } else if (alcance === 'infracciones') {
     await sincronizarInspeccion();
   }
-  await AuditLog.create({ accion: 'eliminar-datos', entidad: 'Campana', entidadId: alcance, usuario: req.user._id, detalle: JSON.stringify(borrados) });
+  await AuditLog.create({ accion: 'eliminar-datos', entidad: 'Campana', entidadId: `${alcance}:${categoria || 'TODAS'}`, usuario: req.user._id, detalle: JSON.stringify(borrados) });
   res.json({ borrados });
 });
 

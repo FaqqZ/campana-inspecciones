@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const crypto = require('crypto');
 const multer = require('multer');
-const { Notificacion, FotoEdificio, Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
+const { Campana, Notificacion, FotoEdificio, Edificio, Infraccion, DocumentoEdificio, Inspeccion, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, norm } = require('../models');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
 const { generarPlantilla, leerHoja, leerCruce, leerActas, validarFilas, CAMPOS_TEXTO_CATASTRO, presenteCert } = require('../services/importador');
 const { TIPO_CERT, MOTIVO_CERT } = require('../services/catastro');
@@ -29,7 +29,7 @@ router.get('/plantilla/:tipo', tipoValido, (req, res) => {
   if (['cruce', 'actas'].includes(req.params.tipo)) return res.status(404).json({ message: 'Este formato se carga con el archivo tal cual, sin plantilla' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="plantilla-${req.params.tipo}.xlsx"`);
-  res.send(generarPlantilla(req.params.tipo));
+  res.send(generarPlantilla(req.params.tipo, req.query.categoria));
 });
 
 const subir = (req, res, next) =>
@@ -62,8 +62,11 @@ async function preparar(req) {
     const certDe = new Map(certs.map((d) => [String(d.edificio), d]));
     ctx = { existentes: new Map(ex.map((e) => [e.direccionNorm, { ...e, certificado: certDe.get(String(e._id)) || null }])) };
   } else if (tipo === 'edificios') {
-    const ex = await Edificio.find({ campana }, 'direccionNorm').setOptions({ incluirOcultos: true }).lean();
-    ctx = { existentes: new Set(ex.map((e) => e.direccionNorm)) };
+    const [ex, camp] = await Promise.all([
+      Edificio.find({ campana }, 'direccionNorm codigo titular lat lng').setOptions({ incluirOcultos: true }).lean(),
+      Campana.findById(campana).select('categoria').lean(),
+    ]);
+    ctx = { existentes: new Map(ex.map((e) => [e.direccionNorm, e])), porNombre: !!camp?.categoria && camp.categoria !== 'EDIFICIOS' };
   } else {
     const [edif, mot, insp, est, ofi, exist] = await Promise.all([
       Edificio.find({ campana }, 'direccionNorm').setOptions({ incluirOcultos: true }).lean(),
@@ -328,6 +331,11 @@ router.post('/:tipo/previsualizar', tipoValido, permitir('importar'), subir, asy
       unidas,
       conAvisos: resultado.filter((r) => r.avisos?.length && !r.unida).length,
       certificados: resultado.filter((r) => r.data?.cert?.tiene).length,
+      ...(req.params.tipo === 'edificios' && {
+        nuevas: resultado.filter((r) => !r.errores.length && !r.data?.actualiza).length,
+        aActualizar: resultado.filter((r) => !r.errores.length && r.data?.actualiza && r.cambios.length).length,
+        sinCambios: resultado.filter((r) => !r.errores.length && r.data?.actualiza && !r.cambios.length).length,
+      }),
       ...(req.params.tipo === 'cruce' && {
         nuevas: validasCruce(resultado).filter((r) => !r.data.actualiza).length,
         aActualizar: validasCruce(resultado).filter((r) => r.data.actualiza && r.cambios.length).length,
@@ -447,11 +455,13 @@ router.post('/:tipo/confirmar', tipoValido, permitir('importar'), subir, async (
   }
 
   if (tipo === 'edificios') {
-    const docs = validas.map((r) => ({ ...r.data, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id }));
-    await Edificio.insertMany(docs, { ordered: false });
-    audit('importar', 'Edificio', lote, req.user, `${docs.length} edificios`);
-    procesarPendientes({ campana }); // arranca la geocodificación en segundo plano
-    return res.status(201).json({ lote, importadas: docs.length, omitidas: resultado.length - docs.length, geocodificando: true });
+    const docs = validas.filter((r) => !r.data.actualiza).map((r) => ({ ...r.data, campana, origen: 'excel', lotImportacion: lote, creadoPor: req.user._id }));
+    const completar = validas.filter((r) => r.data.actualiza && r.cambios.length);
+    if (docs.length) await Edificio.insertMany(docs, { ordered: false });
+    if (completar.length) await Edificio.bulkWrite(completar.map((r) => ({ updateOne: { filter: { _id: r.data.actualiza }, update: { $set: r.data.set } } })), { ordered: false });
+    audit('importar', 'Edificio', lote, req.user, `${docs.length} edificios nuevos, ${completar.length} completados`);
+    procesarPendientes({ campana }); // arranca la geocodificación en segundo plano (solo las direcciones sin coordenadas)
+    return res.status(201).json({ lote, importadas: docs.length, actualizadas: completar.length, sinCambios: validas.length - docs.length - completar.length, omitidas: resultado.length - validas.length, geocodificando: true });
   }
 
   // infracciones / actas: las filas unidas ya están incluidas en su acta principal

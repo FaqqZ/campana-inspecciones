@@ -1,9 +1,10 @@
 const router = require('express').Router();
-const { Edificio, DocumentoEdificio, FotoEdificio, Notificacion, Infraccion, Inspeccion, ESTADOS_INSPECCION } = require('../models');
+const multer = require('multer');
+const { CATEGORIAS, Campana, Edificio, DocumentoEdificio, FotoEdificio, Notificacion, Infraccion, Inspeccion, ESTADOS_INSPECCION } = require('../models');
 const fotosStore = require('../services/fotosStore');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
 const { calcularKpisEdificios } = require('../services/kpis');
-const { campanaDe, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe } = require('../services/edificios');
+const { campanaDe, categoriasPedidas, campanasPorCategoria, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe } = require('../services/edificios');
 const { evaluarEdificio } = require('../services/semaforo');
 const { vigentesPorEdificio, estadoPlazo, diasRestantes } = require('../services/notificaciones');
 const { normalizarCalle, parseNumero, claveDireccion, titulo } = require('../services/direcciones');
@@ -11,26 +12,30 @@ const { procesarPendientes } = require('../services/geocodificador');
 
 router.use(protect);
 
+const MAX_FOTOS_POR_VEZ = 10;
+const subirFotos = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: MAX_FOTOS_POR_VEZ } }).array('fotos', MAX_FOTOS_POR_VEZ);
+
 const bad = (res, message) => res.status(400).json({ message });
 
-// Puntos livianos para el mapa
+// Puntos livianos para el mapa: junta las campañas de las categorías pedidas (categorias=EDIFICIOS,COLEGIOS,BOLICHES).
 router.get('/mapa', async (req, res) => {
-  const campana = await campanaDe(req);
-  const filtro = await aplicarInfracciones(filtroBase(campana, req.query), req.query);
-  const todos = await Edificio.find(filtro).select('direccionOriginal lat lng geoEstado estadoInspeccion').lean();
+  const categoriaDe = await campanasPorCategoria(categoriasPedidas(req.query));
+  const filtro = await aplicarInfracciones({ ...filtroBase(null, req.query), campana: { $in: [...categoriaDe.keys()] } }, req.query);
+  const todos = await Edificio.find(filtro).select('campana direccionOriginal titular lat lng geoEstado estadoInspeccion').lean();
   const sem = await semaforosDe(todos.map((e) => e._id));
   const fotos = new Map((await FotoEdificio.aggregate([{ $group: { _id: '$edificio', n: { $sum: 1 } } }])).map((f) => [String(f._id), f.n]));
   const vigentes = vigentesPorEdificio(await Notificacion.find({ edificio: { $in: todos.map((e) => e._id) } }).lean());
   const plazoDe = (id) => (vigentes.has(String(id)) ? estadoPlazo(vigentes.get(String(id)).fechaVencimiento, new Date(), vigentes.get(String(id)).resultado) : null);
-  let lista = todos.map((e) => ({ ...e, semaforo: sem.get(String(e._id)), fotos: fotos.get(String(e._id)) || 0, plazo: plazoDe(e._id) }));
+  let lista = todos.map((e) => ({ ...e, categoria: categoriaDe.get(String(e.campana)), semaforo: sem.get(String(e._id)), fotos: fotos.get(String(e._id)) || 0, plazo: plazoDe(e._id) }));
   if (req.query.notificado === 'si') lista = lista.filter((e) => e.plazo);
   else if (req.query.notificado) lista = lista.filter((e) => e.plazo === req.query.notificado);
   if (req.query.conFotos === 'si') lista = lista.filter((e) => e.fotos > 0);
   if (req.query.semaforo) lista = lista.filter((e) => e.semaforo === req.query.semaforo);
   const puntos = lista
     .filter((e) => e.lat !== null && e.lng !== null)
-    .map((e) => ({ id: e._id, lat: e.lat, lng: e.lng, direccion: e.direccionOriginal, semaforo: e.semaforo, estadoInspeccion: e.estadoInspeccion, geoEstado: e.geoEstado, fotos: e.fotos, plazo: e.plazo }));
-  res.json({ puntos, total: lista.length, sinUbicar: lista.length - puntos.length });
+    .map((e) => ({ id: e._id, lat: e.lat, lng: e.lng, direccion: e.direccionOriginal, nombre: e.titular || undefined, categoria: e.categoria, semaforo: e.semaforo, estadoInspeccion: e.estadoInspeccion, geoEstado: e.geoEstado, fotos: e.fotos, plazo: e.plazo }));
+  const conteos = Object.fromEntries(categoriasPedidas(req.query).map((c) => [c, lista.filter((e) => e.categoria === c).length]));
+  res.json({ puntos, total: lista.length, sinUbicar: lista.length - puntos.length, conteos });
 });
 
 // Indicadores de edificios y del cruce Catastro / Defensa Civil
@@ -171,8 +176,10 @@ router.get('/:id', async (req, res) => {
     Notificacion.find({ edificio: e._id }).sort('-fechaNotificacion').lean(),
   ]);
   const ev = evaluarEdificio(tipos, documentos, new Date());
+  const camp = await Campana.findById(e.campana).select('categoria').lean();
   res.json({
     edificio: e,
+    categoria: camp?.categoria || 'EDIFICIOS',
     semaforo: ev.semaforo,
     documentos: ev.detalle.map(({ tipo, doc, estado }) => ({ tipo, doc, estado })),
     infraccionesPotenciales: ev.infraccionesPotenciales,
@@ -191,6 +198,28 @@ router.get('/:id/fotos/:fotoId', async (req, res) => {
   res.type(f.tipo);
   res.setHeader('Cache-Control', 'private, max-age=3600');
   res.sendFile(p, (err) => { if (err && !res.headersSent) res.status(404).json({ message: 'No encontrada' }); });
+});
+
+// Adjuntar fotos a un local (hasta 10 por vez, 10 MB cada una; PNG, JPG, GIF o WebP)
+router.post('/:id/fotos', permitir('editarEdificios'), (req, res, next) =>
+  subirFotos(req, res, (err) => (err ? bad(res, err.code === 'LIMIT_FILE_SIZE' ? 'Cada foto puede pesar hasta 10 MB' : err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT' ? `Hasta ${MAX_FOTOS_POR_VEZ} fotos por vez` : 'No se pudieron leer las fotos') : next())),
+async (req, res) => {
+  const e = await Edificio.findById(req.params.id).select('_id');
+  if (!e) return res.status(404).json({ message: 'No encontrado' });
+  if (!req.files?.length) return bad(res, 'Elegí al menos una foto');
+  const existentes = await FotoEdificio.countDocuments({ edificio: e._id });
+  const docs = [];
+  const rechazadas = [];
+  for (const f of req.files) {
+    const img = fotosStore.detectarImagen(f.buffer);
+    if (!img) { rechazadas.push(f.originalname); continue; }
+    const archivo = await fotosStore.guardar(e._id, f.buffer, img.ext);
+    docs.push({ edificio: e._id, archivo, nombreOriginal: Buffer.from(f.originalname, 'latin1').toString('utf8').slice(0, 200), tipo: img.tipo, tamano: f.buffer.length, orden: existentes + docs.length, creadoPor: req.user._id });
+  }
+  if (!docs.length) return bad(res, 'Ningún archivo es una imagen válida (PNG, JPG, GIF o WebP)');
+  await FotoEdificio.insertMany(docs);
+  audit('subir-fotos', 'Edificio', e._id, req.user, `${docs.length} foto(s)`);
+  res.status(201).json({ subidas: docs.length, rechazadas });
 });
 
 router.delete('/:id/fotos/:fotoId', permitir('editarEdificios'), async (req, res) => {

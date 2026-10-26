@@ -24,9 +24,11 @@ function responder(d: any, url: string, p: P): unknown {
   if (u === '/edificios/mapa') {
     const ids = new Set(edificiosFiltrados().map((e: any) => e._id));
     const lista = d.mapa.filter((x: any) => ids.has(x.id) && (!p.semaforo || x.semaforo === p.semaforo) && (p.conFotos !== 'si' || x.fotos > 0) &&
-      (!p.notificado || (p.notificado === 'si' ? x.plazo : x.plazo === p.notificado)));
+      (!p.notificado || (p.notificado === 'si' ? x.plazo : x.plazo === p.notificado)) &&
+      (p.categorias || 'EDIFICIOS,COLEGIOS,BOLICHES').split(',').includes(x.categoria || 'EDIFICIOS')); // snapshots viejos: todo es EDIFICIOS
     const sinUbicar = edificiosFiltrados().filter((e: any) => e.lat == null || e.lng == null).length;
-    return { puntos: lista, total: lista.length + sinUbicar, sinUbicar };
+    const conteos = Object.fromEntries((p.categorias || 'EDIFICIOS,COLEGIOS,BOLICHES').split(',').map((c: string) => [c, lista.filter((x: any) => (x.categoria || 'EDIFICIOS') === c).length]));
+    return { puntos: lista, total: lista.length + sinUbicar, sinUbicar, conteos };
   }
   if (u === '/edificios/calles') {
     const m = new Map<string, { calleNorm: string; calle: string; cantidad: number }>();

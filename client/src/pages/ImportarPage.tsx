@@ -3,7 +3,8 @@ import {
   Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, TextField, LinearProgress, Paper, Stack, Switch, Table, TableBody,
   TableCell, TableHead, TableRow, ToggleButton, ToggleButtonGroup, Typography,
 } from '@mui/material';
-import { api, errMsg } from '../api';
+import { api, errMsg, Categoria } from '../api';
+import { CATEGORIAS, TODAS_CATEGORIAS } from '../semaforo';
 import { useAuth } from '../auth';
 
 type Tipo = 'edificios' | 'infracciones' | 'cruce' | 'actas' | 'fotos' | 'notificados';
@@ -16,6 +17,7 @@ export default function ImportarPage() {
   const { user } = useAuth();
   const esAdmin = user?.role === 'Administrador';
   const [tipo, setTipo] = useState<Tipo>('edificios');
+  const [categoria, setCategoria] = useState<Categoria>('EDIFICIOS');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [prev, setPrev] = useState<Prev | null>(null);
   const [crearCatalogos, setCrearCatalogos] = useState(false);
@@ -28,13 +30,15 @@ export default function ImportarPage() {
   const input = useRef<HTMLInputElement>(null);
   const [datos, setDatos] = useState<Record<string, number> | null>(null);
   const [borrar, setBorrar] = useState<{ alcance: string; texto: string } | null>(null);
-  const cargarDatos = () => { if (esAdmin) api.get('/admin/datos').then((r) => setDatos(r.data)).catch(() => {}); };
-  useEffect(cargarDatos, [esAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [alcanceCat, setAlcanceCat] = useState<'TODAS' | Categoria>('TODAS'); // qué categoría afecta "Eliminar lo cargado"
+  const cargarDatos = () => { if (esAdmin) api.get('/admin/datos', { params: { categoria: alcanceCat } }).then((r) => setDatos(r.data)).catch(() => {}); };
+  useEffect(cargarDatos, [esAdmin, alcanceCat]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nombreAlcance = alcanceCat === 'TODAS' ? 'de todas las categorías' : `de ${CATEGORIAS[alcanceCat].label.toLowerCase()}`;
 
   const eliminar = async () => {
     if (!borrar) return;
     try {
-      const r = await api.delete('/admin/datos', { data: { alcance: borrar.alcance, confirmar: borrar.texto } });
+      const r = await api.delete('/admin/datos', { data: { alcance: borrar.alcance, confirmar: borrar.texto, categoria: alcanceCat } });
       setMsg(`Se eliminó: ${Object.entries(r.data.borrados).map(([k, v]) => `${v} ${k}`).join(', ')}.`);
       setError(''); setBorrar(null); setPrev(null); setLote(null); cargarDatos();
     } catch (e) { setError(errMsg(e)); }
@@ -54,15 +58,16 @@ export default function ImportarPage() {
     f.append('archivo', archivo!);
     f.append('crearCatalogos', String(crearCatalogos));
     f.append('crearEdificios', String(crearEdificios));
+    if (tipo === 'edificios') f.append('categoria', categoria); // cada categoría se carga en su propia campaña
     return f;
   };
 
   const descargarPlantilla = async () => {
     try {
-      const r = await api.get(`/importar/plantilla/${tipo}`, { responseType: 'blob' });
+      const r = await api.get(`/importar/plantilla/${tipo}`, { params: tipo === 'edificios' ? { categoria } : undefined, responseType: 'blob' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(r.data);
-      a.download = `plantilla-${tipo}.xlsx`;
+      a.download = `plantilla-${tipo === 'edificios' ? categoria.toLowerCase() : tipo}.xlsx`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) { setError(errMsg(e)); }
@@ -81,7 +86,7 @@ export default function ImportarPage() {
       const r = await api.post(`/importar/${tipo}/confirmar`, form());
       setLote({ id: r.data.lote, tipo, importadas: r.data.importadas + (r.data.actualizadas ?? 0) });
       const extra = [r.data.actualizadas ? `${r.data.actualizadas} actualizados` : '', r.data.sinCambios ? `${r.data.sinCambios} ya estaban al día` : '', r.data.unidas ? `${r.data.unidas} repetidas unidas` : '', r.data.conCertificado !== undefined ? `${r.data.conCertificado} con certificado final` : '', r.data.edificiosCreados ? `${r.data.edificiosCreados} edificios nuevos` : '', r.data.omitidas ? `${r.data.omitidas} omitidas por errores` : ''].filter(Boolean).join(', ');
-      setMsg(`Se importaron ${r.data.importadas} ${tipo === 'fotos' ? 'fotos' : tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : 'edificios'}${extra ? ` (${extra})` : ''}.`);
+      setMsg(`Se importaron ${r.data.importadas} ${tipo === 'fotos' ? 'fotos' : tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : tipo === 'edificios' ? CATEGORIAS[categoria].label.toLowerCase() : 'edificios'}${extra ? ` (${extra})` : ''}.`);
       setPrev(null); setArchivo(null);
       if (input.current) input.current.value = '';
     } catch (e) { setError(errMsg(e)); }
@@ -112,8 +117,14 @@ export default function ImportarPage() {
           <ToggleButton value="fotos">Fotos (Word)</ToggleButton>
           <ToggleButton value="notificados">Edificios notificados</ToggleButton>
         </ToggleButtonGroup>
+        {tipo === 'edificios' && (
+          <ToggleButtonGroup exclusive value={categoria} onChange={(_, v) => { if (v) { setCategoria(v); setPrev(null); setMsg(''); } }} size="small" aria-label="Categoría a importar">
+            {TODAS_CATEGORIAS.map((c) => <ToggleButton key={c} value={c}>{CATEGORIAS[c].emoji} {CATEGORIAS[c].label}</ToggleButton>)}
+          </ToggleButtonGroup>
+        )}
         <Alert severity="info">
-          {tipo === 'edificios' && 'Cargá un .xlsx con las columnas Calle y Número (o una sola columna "Dirección completa"). Después de importar, las direcciones se ubican solas en el mapa.'}
+          {tipo === 'edificios' && categoria === 'EDIFICIOS' && 'Cargá un .xlsx con las columnas Calle y Número (o una sola columna "Dirección completa"). Después de importar, las direcciones se ubican solas en el mapa. También acepta ID, Razón social (o Nombre), Latitud y Longitud: si el edificio ya existe, solo se le completan los datos que le faltan, sin pisar lo cargado.'}
+          {tipo === 'edificios' && categoria !== 'EDIFICIOS' && 'Cargá un .xlsx con ID, Nombre, Dirección (o Calle y Número) y, si las tenés, Latitud y Longitud: con coordenadas el punto queda ubicado tal cual; sin ellas se busca la dirección en el mapa. Dos locales pueden compartir dirección. Observaciones es opcional.'}
           {tipo === 'infracciones' && 'Cargá infracciones en lote. Cada una se asocia al edificio por Calle + Número. Los inspectores, motivos, estados y oficinas se buscan por nombre en los catálogos; si el estado o la oficina van vacíos, se usan los iniciales.'}
           {tipo === 'fotos' && 'Subí un Word (.docx) con las direcciones de los edificios y las fotos debajo de cada una. Cada foto se asocia al edificio de esa dirección y se ve en la pestaña Fotos de su ficha en el mapa, junto con lo que informa Catastro sobre el final de obra.'}
           {tipo === 'actas' && 'Subí el listado de actas de infracción tal cual (Fecha, Domicilio, Razón Social, N° de Acta, Motivo, Normativa). Cada acta se asocia al edificio por su domicilio, el motivo se clasifica en el catálogo y el texto original queda guardado. Si un acta aparece repetida en el mismo domicilio se une en una sola.'}
@@ -151,15 +162,15 @@ export default function ImportarPage() {
               <Chip color={prev.conErrores ? 'error' : 'default'} label={`${prev.conErrores} con errores`} />
               {!!prev.unidas && <Chip color="info" label={`${prev.unidas} repetidas, se unen`} />}
               {!!prev.conAvisos && <Chip color="warning" label={`${prev.conAvisos} con avisos`} />}
-              {tipo === 'cruce' && <Chip color="primary" variant="outlined" label={`${prev.nuevas ?? 0} nuevos`} />}
-              {tipo === 'cruce' && <Chip color="primary" label={`${prev.aActualizar ?? 0} a actualizar`} />}
-              {tipo === 'cruce' && !!prev.sinCambios && <Chip variant="outlined" label={`${prev.sinCambios} sin cambios`} />}
+              {(tipo === 'cruce' || tipo === 'edificios') && <Chip color="primary" variant="outlined" label={`${prev.nuevas ?? 0} nuevos`} />}
+              {(tipo === 'cruce' || (tipo === 'edificios' && !!prev.aActualizar)) && <Chip color="primary" label={`${prev.aActualizar ?? 0} a completar`.replace('completar', tipo === 'cruce' ? 'actualizar' : 'completar')} />}
+              {(tipo === 'cruce' || tipo === 'edificios') && !!prev.sinCambios && <Chip variant="outlined" label={`${prev.sinCambios} sin cambios`} />}
               {tipo === 'cruce' && <Chip variant="outlined" label={`${prev.certificados ?? 0} con certificado final`} />}
               {tipo === 'fotos' && <Chip variant="outlined" label={`${prev.fotos ?? 0} fotos`} />}
               {tipo === 'fotos' && !!prev.sinDireccion && <Chip color="warning" label={`${prev.sinDireccion} imágenes sin dirección`} />}
               {tipo === 'fotos' && !!prev.ignoradas && <Chip color="warning" label={`${prev.ignoradas} imágenes ignoradas (formato no soportado)`} />}
               <Box sx={{ flex: 1 }} />
-              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>{tipo === 'fotos' ? `Importar ${prev.fotos ?? 0} fotos` : <>{tipo === 'cruce' ? `Cargar ${(prev.nuevas ?? 0)} nuevos y actualizar ${(prev.aActualizar ?? 0)}` : <>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : 'edificios'}</>}</>}</Button>
+              <Button variant="contained" disabled={!prev.validas || busy} onClick={confirmar}>{tipo === 'fotos' ? `Importar ${prev.fotos ?? 0} fotos` : <>{tipo === 'cruce' || (tipo === 'edificios' && !!prev.aActualizar) ? `Cargar ${(prev.nuevas ?? 0)} nuevos y ${tipo === 'cruce' ? 'actualizar' : 'completar'} ${(prev.aActualizar ?? 0)}` : <>Importar {prev.validas - (prev.unidas ?? 0)} {tipo === 'notificados' ? 'notificaciones' : esInfra(tipo) ? 'infracciones' : 'edificios'}</>}</>}</Button>
             </Stack>
             <Box sx={{ overflowX: 'auto' }}><Table size="small">
               <TableHead><TableRow><TableCell width={70}>Fila</TableCell><TableCell>Dirección</TableCell><TableCell>Resultado</TableCell></TableRow></TableHead>
@@ -182,14 +193,18 @@ export default function ImportarPage() {
         {esAdmin && datos && (
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle2" gutterBottom>Eliminar lo cargado</Typography>
+            <ToggleButtonGroup exclusive size="small" value={alcanceCat} onChange={(_, v) => v && setAlcanceCat(v)} aria-label="Categoría a eliminar" sx={{ mb: 1.5 }}>
+              <ToggleButton value="TODAS">Todas</ToggleButton>
+              {TODAS_CATEGORIAS.map((c) => <ToggleButton key={c} value={c}>{CATEGORIAS[c].emoji} {CATEGORIAS[c].label}</ToggleButton>)}
+            </ToggleButtonGroup>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              Hay {datos.edificios} edificios, {datos.infracciones} infracciones, {datos.notificaciones} notificaciones y {datos.fotos} fotos. Sirve para empezar de nuevo antes de volver a importar. Los catálogos y los usuarios no se tocan. No se puede deshacer: conviene hacer un respaldo antes.
+              Hay {datos.edificios} {alcanceCat === 'TODAS' ? 'puntos (edificios, colegios y boliches)' : CATEGORIAS[alcanceCat].label.toLowerCase()}, {datos.infracciones} infracciones, {datos.notificaciones} notificaciones y {datos.fotos} fotos. Sirve para empezar de nuevo antes de volver a importar. Los catálogos y los usuarios no se tocan. No se puede deshacer: conviene hacer un respaldo antes.
             </Typography>
             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
               <Button color="error" variant="outlined" onClick={() => setBorrar({ alcance: 'infracciones', texto: '' })}>Eliminar infracciones</Button>
               <Button color="error" variant="outlined" onClick={() => setBorrar({ alcance: 'notificaciones', texto: '' })}>Eliminar notificaciones</Button>
               <Button color="error" variant="outlined" onClick={() => setBorrar({ alcance: 'fotos', texto: '' })}>Eliminar fotos</Button>
-              <Button color="error" variant="contained" onClick={() => setBorrar({ alcance: 'todo', texto: '' })}>Eliminar todo (edificios y lo asociado)</Button>
+              <Button color="error" variant="contained" onClick={() => setBorrar({ alcance: 'todo', texto: '' })}>{`Eliminar todo ${nombreAlcance}`}</Button>
             </Stack>
           </Paper>
         )}
@@ -198,8 +213,8 @@ export default function ImportarPage() {
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
               {borrar?.alcance === 'todo'
-                ? 'Se eliminarán todos los edificios, con sus documentos, fotos, notificaciones e infracciones.'
-                : `Se eliminarán todas las ${borrar?.alcance} cargadas.`} Esta acción no se puede deshacer. Escribí ELIMINAR para continuar.
+                ? `Se eliminarán todos los puntos ${nombreAlcance}, con sus documentos, fotos, notificaciones e infracciones.`
+                : `Se eliminarán las ${borrar?.alcance} cargadas ${nombreAlcance}.`} Esta acción no se puede deshacer. Escribí ELIMINAR para continuar.
             </DialogContentText>
             <TextField autoFocus fullWidth size="small" value={borrar?.texto ?? ''} onChange={(e) => setBorrar({ ...borrar!, texto: e.target.value })} />
           </DialogContent>

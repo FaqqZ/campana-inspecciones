@@ -48,6 +48,7 @@ export interface Edificio {
   geoEstado: GeoEstado;
   geoDisplayName: string;
   titular: string;
+  codigo?: string;
   uso: string;
   observaciones: string;
   estadoInspeccion: EstadoInspeccion;
@@ -82,8 +83,11 @@ export interface Notificacion {
   diasRestantes: number | null;
   vigente?: boolean;
 }
+export type Categoria = 'EDIFICIOS' | 'COLEGIOS' | 'BOLICHES';
 export interface PuntoMapa {
   id: string;
+  categoria?: Categoria; // snapshots viejos no la traen: son EDIFICIOS
+  nombre?: string;
   lat: number;
   lng: number;
   direccion: string;
@@ -159,6 +163,7 @@ export interface InspeccionVisita {
 }
 export interface Ficha {
   edificio: Edificio;
+  categoria?: Categoria;
   semaforo: Semaforo;
   documentos: FichaDocumento[];
   infraccionesPotenciales: { documento: string; estado: EstadoDoc; motivo: { _id: string; nombre: string } }[];

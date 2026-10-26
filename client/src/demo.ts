@@ -32,6 +32,19 @@ const EDIFICIOS = Array.from({ length: 48 }, (_, i) => {
   };
 });
 
+// Puntos de ejemplo de las otras categorías (solo se ven en el mapa).
+const OTRAS = [
+  ...Array.from({ length: 10 }, (_, i) => ({ categoria: 'COLEGIOS' as const, nombre: `Escuela N° ${i + 1}` })),
+  ...Array.from({ length: 8 }, (_, i) => ({ categoria: 'BOLICHES' as const, nombre: `Boliche ${['Eclipse', 'Kuma', 'Nube', 'Savia', 'Órbita', 'Tango', 'Zona', 'Luna'][i]}` })),
+].map((o, i) => {
+  const calle = CALLES[(i * 3) % CALLES.length];
+  const numero = 100 + Math.floor(rnd() * 1800);
+  return {
+    ...o, id: `o${i}`, lat: -26.8241 + (rnd() - 0.5) * 0.03, lng: -65.2226 + (rnd() - 0.5) * 0.03, direccion: `${calle} ${numero}`,
+    semaforo: pick(['vigente', 'faltante', 'vencido', 'por_vencer'] as const), estadoInspeccion: 'pendiente' as const, geoEstado: 'ok' as const, fotos: 0, plazo: null,
+  };
+});
+
 const hoy = Date.now();
 const INFRACCIONES = Array.from({ length: 70 }, (_, i) => {
   const e = EDIFICIOS[Math.floor(rnd() * 30)];
@@ -112,9 +125,12 @@ function responder(url: string, params: Record<string, string> = {}): unknown {
   const u = url.replace(/^\/api/, '');
   if (u === '/auth/me') return { id: 'prueba', nombres: 'Demo', apellidos: 'Sin login', username: 'demo', role: 'Administrador' };
   if (u === '/edificios/mapa') {
-    const puntos = EDIFICIOS.map((e) => ({ id: e._id, lat: e.lat, lng: e.lng, direccion: e.direccionOriginal, semaforo: e.semaforo, estadoInspeccion: e.estadoInspeccion, geoEstado: e.geoEstado, fotos: 0, plazo: plazoEdificio(e._id) }))
+    const cats = (params?.categorias || 'EDIFICIOS,COLEGIOS,BOLICHES').split(',');
+    const todos = [...EDIFICIOS.map((e) => ({ id: e._id, lat: e.lat, lng: e.lng, direccion: e.direccionOriginal, semaforo: e.semaforo, estadoInspeccion: e.estadoInspeccion, geoEstado: e.geoEstado, fotos: 0, plazo: plazoEdificio(e._id), categoria: 'EDIFICIOS' as const })), ...OTRAS]
+      .filter((p) => cats.includes(p.categoria))
       .filter((p) => !params?.notificado || (params.notificado === 'si' ? p.plazo : p.plazo === params.notificado));
-    return { puntos, total: puntos.length, sinUbicar: 0 };
+    const conteos = Object.fromEntries(cats.map((c) => [c, todos.filter((p) => p.categoria === c).length]));
+    return { puntos: todos, total: todos.length, sinUbicar: 0, conteos };
   }
   if (u === '/edificios/calles') return agrupar(EDIFICIOS.map((e) => e.calle)).map((c) => ({ calleNorm: c.nombre.toLowerCase(), calle: c.nombre, cantidad: c.cantidad }));
   if (u === '/edificios/resumen')

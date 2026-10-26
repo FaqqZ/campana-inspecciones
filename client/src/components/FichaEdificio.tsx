@@ -14,7 +14,7 @@ import {
 import { useAuth } from '../auth';
 import { can } from '../utils/permisos';
 import InfraccionForm from './InfraccionForm';
-import { GEO_LABEL, INSPECCION_LABEL, SEMAFORO } from '../semaforo';
+import { CATEGORIAS, GEO_LABEL, INSPECCION_LABEL, SEMAFORO } from '../semaforo';
 import { useMapa } from '../store';
 
 const hoyIso = () => new Date().toISOString().slice(0, 10);
@@ -103,18 +103,28 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
   };
 
   const e = ficha?.edificio;
+  // Colegios y boliches: sin la estructura de edificios (papeles, infracciones, visitas, notificación); solo nombre y datos básicos.
+  const simple = !!ficha?.categoria && ficha.categoria !== 'EDIFICIOS';
+  const nombreInstitucion = (e?.titular || '').trim();
 
   return (
     <Paper square sx={{ width: { xs: '100%', md: 440 }, flexShrink: 0, display: 'flex', flexDirection: 'column', borderWidth: '0 0 0 1px', overflow: 'hidden', position: { xs: 'absolute', md: 'static' }, inset: { xs: 0, md: 'auto' }, zIndex: { xs: 1200, md: 'auto' } }}>
       <Box sx={{ p: 2, pb: 1 }}>
         <Stack direction="row" alignItems="flex-start" spacing={1}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="h6" noWrap>{e?.direccionOriginal ?? 'Cargando…'}</Typography>
+            {simple ? (
+              <>
+                <Typography variant="h6" sx={{ wordBreak: 'break-word' }}>{nombreInstitucion || 'Sin nombre'}</Typography>
+                <Typography variant="body2" color="text.secondary">{e?.direccionOriginal}</Typography>
+              </>
+            ) : (
+              <Typography variant="h6" noWrap>{e?.direccionOriginal ?? 'Cargando…'}</Typography>
+            )}
             {e && (
               <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5 }}>
-                <Chip size="small" label={SEMAFORO[ficha!.semaforo].label} sx={{ bgcolor: SEMAFORO[ficha!.semaforo].color, color: ficha!.semaforo === 'por_vencer' ? '#2a1d00' : '#fff' }} />
+                {ficha?.categoria && ficha.categoria !== 'EDIFICIOS' && <Chip size="small" color="primary" variant="outlined" label={`${CATEGORIAS[ficha.categoria].emoji} ${CATEGORIAS[ficha.categoria].label.replace(/s$/, '')}`} />}
                 <Chip size="small" variant="outlined" label={`Ubicación: ${GEO_LABEL[e.geoEstado]}`} />
-                <Chip size="small" variant="outlined" label={INSPECCION_LABEL[e.estadoInspeccion]} />
+                {!simple && <Chip size="small" variant="outlined" label={INSPECCION_LABEL[e.estadoInspeccion]} />}
               </Stack>
             )}
           </Box>
@@ -127,17 +137,30 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
         )}
         {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
       </Box>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: 'divider' }}>
+      {!simple && <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Datos" />
         <Tab label="Papeles" />
         <Tab label={`Infracciones${ficha ? ` (${ficha.infracciones.length})` : ''}`} />
         <Tab label={`Visitas${ficha ? ` (${ficha.inspecciones.length})` : ''}`} />
         <Tab label={`Fotos${ficha ? ` (${ficha.fotos?.length ?? 0})` : ''}`} />
         <Tab label={`Notificación${ficha?.notificaciones?.length ? ` (${ficha.notificaciones.length})` : ''}`} />
-      </Tabs>
+      </Tabs>}
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-        {ficha && e && tab === 0 && (
+        {ficha && e && simple && (
+          <Stack spacing={2}>
+            {e.geoDisplayName && <Typography variant="caption" color="text.secondary">OSM: {e.geoDisplayName}</Typography>}
+            {e.codigo && <TextField size="small" label="ID" value={e.codigo} disabled />}
+            <TextField size="small" label="Nombre" value={datos.titular} disabled={!puedeEditar} onChange={(ev) => setDatos({ ...datos, titular: ev.target.value })} />
+            <TextField size="small" label="Dirección" value={e.direccionOriginal} disabled />
+            <TextField size="small" label="Observaciones" multiline minRows={2} value={datos.observaciones} disabled={!puedeEditar} onChange={(ev) => setDatos({ ...datos, observaciones: ev.target.value })} />
+            {puedeEditar && <Button variant="contained" onClick={() => accion(() => api.patch(`/edificios/${id}`, { titular: datos.titular, observaciones: datos.observaciones }))}>Guardar</Button>}
+            <Divider />
+            <Typography variant="subtitle2">Fotos{ficha.fotos?.length ? ` (${ficha.fotos.length})` : ''}</Typography>
+            <FotosEdificio simple edificio={e} fotos={ficha.fotos ?? []} puedeEditar={puedeEditar} onCambio={tras} />
+          </Stack>
+        )}
+        {ficha && e && !simple && tab === 0 && (
           <Stack spacing={2}>
             {e.geoDisplayName && <Typography variant="caption" color="text.secondary">OSM: {e.geoDisplayName}</Typography>}
             <AvisoFinalDeObra e={e} />
@@ -190,7 +213,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
           </Stack>
         )}
 
-        {ficha && e && tab === 1 && (
+        {ficha && e && !simple && tab === 1 && (
           <Stack spacing={1.5}>
             {ficha.documentos.length === 0 && <Alert severity="info">No hay tipos de documento definidos. Cargalos en Catálogos.</Alert>}
             {ficha.documentos.map((d) => (
@@ -199,7 +222,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
           </Stack>
         )}
 
-        {ficha && e && tab === 2 && (
+        {ficha && e && !simple && tab === 2 && (
           <Stack spacing={1.5}>
             {ficha.infracciones.length === 0 && <Typography variant="body2" color="text.secondary">Este edificio no tiene infracciones cargadas.</Typography>}
             {ficha.infracciones.map((a) => (
@@ -223,9 +246,9 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
           </Stack>
         )}
 
-        {ficha && e && tab === 5 && <NotificacionesEdificio edificioId={id} notificaciones={ficha.notificaciones ?? []} puedeEditar={puedeEditar} onCambio={tras} />}
-        {ficha && e && tab === 4 && <FotosEdificio edificio={e} fotos={ficha.fotos ?? []} puedeEditar={puedeEditar} onCambio={tras} />}
-        {ficha && e && tab === 3 && (
+        {ficha && e && !simple && tab === 5 && <NotificacionesEdificio edificioId={id} notificaciones={ficha.notificaciones ?? []} puedeEditar={puedeEditar} onCambio={tras} />}
+        {ficha && e && !simple && tab === 4 && <FotosEdificio edificio={e} fotos={ficha.fotos ?? []} puedeEditar={puedeEditar} onCambio={tras} />}
+        {ficha && e && !simple && tab === 3 && (
           <Stack spacing={1.5}>
             {ficha.inspecciones.length === 0 && <Typography variant="body2" color="text.secondary">Todavía no hay visitas registradas.</Typography>}
             {ficha.inspecciones.map((i) => (
@@ -263,7 +286,7 @@ export default function FichaEdificio({ id, puedeEditar, onClose, onCambio }: { 
           </Stack>
         )}
       </Box>
-      {e && (
+      {e && !simple && (
         <InfraccionForm
           open={formInf.abierto}
           edificio={{ id, direccion: e.direccionOriginal }}

@@ -1,15 +1,55 @@
 // Consultas compartidas sobre edificios.
-const { Campana, TipoDocumento, DocumentoEdificio, Infraccion, Edificio, Inspeccion } = require('../models');
+const { CATEGORIAS, Campana, TipoDocumento, DocumentoEdificio, Infraccion, Edificio, Inspeccion } = require('../models');
 const { evaluarEdificio } = require('./semaforo');
 const { normalizarCalle, parseNumero, claveDireccion, titulo } = require('./direcciones');
 
 const escapar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const CAMPANA_INICIAL = {
+  EDIFICIOS: 'Relevamiento general de edificios',
+  COLEGIOS: 'Relevamiento de colegios',
+  BOLICHES: 'Relevamiento de boliches',
+};
+
+// Las campañas anteriores a las categorías no tienen el campo: cuentan como EDIFICIOS.
+const filtroCategoria = (cat) => (cat === 'EDIFICIOS' ? { categoria: { $nin: CATEGORIAS.filter((c) => c !== 'EDIFICIOS') } } : { categoria: cat });
+
+/** Campaña activa de una categoría; si no existe (COLEGIOS / BOLICHES la primera vez) la crea. */
+async function campanaDeCategoria(cat) {
+  const c = await Campana.findOne({ activa: true, ...filtroCategoria(cat) }).sort('-createdAt');
+  if (c) return c._id;
+  if (cat === 'EDIFICIOS') return null;
+  const nueva = await Campana.create({
+    nombre: `${cat[0]}${cat.slice(1).toLowerCase()} ${new Date().getFullYear()}`,
+    descripcion: CAMPANA_INICIAL[cat],
+    categoria: cat,
+  });
+  return nueva._id;
+}
+
+/** Campaña de trabajo: la indicada, la de la categoría pedida o, por defecto, la activa de EDIFICIOS. */
 async function campanaDe(req) {
   const id = req.query.campana || req.body?.campana;
   if (id) return id;
-  const c = await Campana.findOne({ activa: true }).sort('-createdAt');
-  return c?._id || null;
+  const cat = req.query.categoria || req.body?.categoria || 'EDIFICIOS';
+  if (!CATEGORIAS.includes(cat)) return null;
+  return campanaDeCategoria(cat);
+}
+
+/** Categorías pedidas en `categorias=A,B` (por defecto todas), sin repetidas ni inválidas. */
+function categoriasPedidas(q) {
+  const pedidas = String(q.categorias || '').split(',').map((c) => c.trim().toUpperCase()).filter((c) => CATEGORIAS.includes(c));
+  return pedidas.length ? [...new Set(pedidas)] : [...CATEGORIAS];
+}
+
+/** Campañas activas de esas categorías: Map(id → categoría). */
+async function campanasPorCategoria(categorias) {
+  const mapa = new Map();
+  for (const cat of categorias) {
+    const ids = await Campana.find({ activa: true, ...filtroCategoria(cat) }).distinct('_id');
+    ids.forEach((id) => mapa.set(String(id), cat));
+  }
+  return mapa;
 }
 
 function filtroBase(campana, q) {
@@ -79,4 +119,4 @@ async function sincronizarInspeccion(ids = null) {
   return { inspeccionados: a.modifiedCount, pendientes: b.modifiedCount };
 }
 
-module.exports = { sincronizarInspeccion, buscarOCrearEdificio, campanaDe, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe };
+module.exports = { sincronizarInspeccion, buscarOCrearEdificio, campanaDe, filtroCategoria, campanaDeCategoria, categoriasPedidas, campanasPorCategoria, filtroBase, aplicarInfracciones, escapar, tiposActivos, semaforosDe };

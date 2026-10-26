@@ -9,8 +9,13 @@ const COLUMNAS = {
   edificios: [
     { key: 'calle', header: 'Calle', required: true, ejemplo: 'Mate de Luna', alias: ['direccion calle'] },
     { key: 'numero', header: 'Número', ejemplo: '1234', alias: ['numero', 'nro', 'n°', 'altura'] },
-    { key: 'direccion', header: 'Dirección completa', ejemplo: '', alias: ['direccion', 'domicilio'] },
-    { key: 'observaciones', header: 'Observaciones', ejemplo: '' },
+    { key: 'direccion', header: 'Dirección completa', ejemplo: '', alias: ['direccion', 'domicilio', 'domicilio normalizado'] },
+    // Solo colegios y boliches (soloOtras): no aparecen en la plantilla de edificios.
+    { key: 'codigo', header: 'ID', ejemplo: 'BAR-001', soloOtras: true, alias: ['codigo', 'id edificio', 'id colegio', 'id-colegio', 'id boliche', 'id-boliche'] },
+    { key: 'nombre', header: 'Nombre', ejemplo: '', soloOtras: true, alias: ['razon social', 'titular', 'institucion', 'establecimiento', 'colegio', 'escuela', 'boliche', 'local', 'escuela / colegio', 'escuela/colegio', 'colegio / escuela', 'colegio/escuela', 'colegio/escuela/instituto', 'colegio / escuela / instituto', 'boliches/pub/penas', 'boliches / pub / penas', 'boliche/pub/pena', 'bar', 'nombre del colegio', 'nombre del boliche'] },
+    { key: 'latitud', header: 'Latitud', ejemplo: '-26.8241', soloOtras: true, alias: ['lat'] },
+    { key: 'longitud', header: 'Longitud', ejemplo: '-65.2226', soloOtras: true, alias: ['lng', 'lon', 'long'] },
+    { key: 'observaciones', header: 'Observaciones', ejemplo: '', alias: ['observacion', 'obs'] },
   ],
   infracciones: [
     { key: 'numeroActa', header: 'N° Acta', required: true, ejemplo: 'A-0001', alias: ['numero acta', 'acta', 'n acta', 'numero'] },
@@ -65,8 +70,8 @@ function leerCruce(buffer) {
   return filas;
 }
 
-function generarPlantilla(tipo) {
-  const cols = COLUMNAS[tipo];
+function generarPlantilla(tipo, categoria = 'EDIFICIOS') {
+  const cols = COLUMNAS[tipo].filter((c) => !c.soloOtras || categoria !== 'EDIFICIOS');
   const ws = XLSX.utils.aoa_to_sheet([cols.map((c) => c.header), cols.map((c) => c.ejemplo)]);
   ws['!cols'] = cols.map((c) => ({ wch: Math.max(c.header.length, String(c.ejemplo).length) + 4 }));
   const wb = XLSX.utils.book_new();
@@ -86,8 +91,19 @@ function valoresDeFila(raw, cols) {
   return v;
 }
 
+/** Coordenada decimal: null si viene vacía, undefined si no es un número. Acepta coma decimal. */
+function parseCoord(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = typeof v === 'number' ? v : Number(String(v).trim().replace(',', '.'));
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /** Resuelve calle + número desde las columnas separadas o la dirección completa. */
+/** "Corrientes N° 570/590" -> "Corrientes N° 570" (se toma el primer número); "24 de Septiembre Esq. Aya" -> "24 de Septiembre y Aya". */
+const limpiarDomicilio = (t) => String(t || '').replace(/(\d{1,6})\s*\/\s*\d{1,6}\b/g, '$1').replace(/\s+esq\.?\s+/i, ' y ').trim();
+
 function resolverDireccion(calleRaw, numeroRaw, direccionRaw, errores) {
+  direccionRaw = limpiarDomicilio(direccionRaw);
   let calle = String(calleRaw || '').trim();
   let numeroTxt = numeroRaw === undefined ? '' : numeroRaw;
   if (!calle && direccionRaw) {
@@ -337,12 +353,39 @@ function validarFilas(tipo, filas, ctx) {
 
     if (tipo === 'edificios') {
       const dir = resolverDireccion(v.calle, v.numero, v.direccion, errores);
+      const nombre = String(v.nombre || '').trim();
+      const codigo = String(v.codigo ?? '').trim();
+      const lat = parseCoord(v.latitud);
+      const lng = parseCoord(v.longitud);
+      if (lat === undefined || lng === undefined || (lat === null) !== (lng === null)) errores.push('Latitud y Longitud deben venir juntas y ser números válidos');
+      else if (lat !== null && (Math.abs(lat) > 90 || Math.abs(lng) > 180)) errores.push('Coordenadas fuera de rango');
+      else if (lat !== null && (lat > -26.7 || lat < -26.95 || lng > -65.05 || lng < -65.4)) avisos.push('Las coordenadas quedan fuera de San Miguel de Tucumán: revisarlas');
       if (dir) {
-        if (ctx.existentes.has(dir.direccionNorm)) errores.push(`${dir.direccionOriginal} ya existe en la campaña`);
-        else if (vistos.has(dir.direccionNorm)) errores.push(`${dir.direccionOriginal} repetida en el archivo`);
-        vistos.add(dir.direccionNorm);
+        // Colegios y boliches: dos locales pueden compartir dirección, así que el nombre forma parte de la clave.
+        const clave = ctx.porNombre && nombre ? `${dir.direccionNorm}|${norm(nombre)}` : dir.direccionNorm;
+        const existe = ctx.existentes.has(clave) || (ctx.porNombre && ctx.existentes.has(dir.direccionNorm));
+        const previo = !ctx.porNombre && typeof ctx.existentes.get === 'function' ? ctx.existentes.get(clave) : null;
+        if (existe && previo && (codigo || nombre || lat != null) && !errores.length && !vistos.has(clave)) {
+          // Ya está cargado: solo se completan los datos que le faltan (no pisa nada).
+          const set = {};
+          const cambios = [];
+          if (codigo && !previo.codigo) { set.codigo = codigo; cambios.push('ID'); }
+          if (nombre && !previo.titular) { set.titular = nombre; cambios.push('titular'); }
+          if (lat != null && lng != null && (previo.lat == null || previo.lng == null)) { Object.assign(set, { lat, lng, geoEstado: 'ok', geoDisplayName: 'Coordenadas del Excel' }); cambios.push('coordenadas'); }
+          vistos.add(clave);
+          return { fila, data: { ...dir, actualiza: previo._id, set }, cambios, errores, avisos, nuevos };
+        }
+        if (existe) errores.push(`${nombre || dir.direccionOriginal} ya existe en la campaña`);
+        else if (vistos.has(clave)) errores.push(nombre ? `${nombre} repetido en el archivo` : `${dir.direccionOriginal} repetida en el archivo`);
+        vistos.add(clave);
+        dir.direccionNorm = clave;
       }
-      return { fila, data: dir ? { ...dir, observaciones: obs } : null, errores, avisos, nuevos };
+      const extra = {
+        ...(nombre && { titular: nombre }),
+        ...(codigo && { codigo }),
+        ...(lat !== null && lat !== undefined && lng !== undefined && { lat, lng, geoEstado: 'ok', geoDisplayName: 'Coordenadas del Excel' }),
+      };
+      return { fila, data: dir ? { ...dir, observaciones: obs, ...extra } : null, errores, avisos, nuevos };
     }
 
     // infracciones

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Alert, Box, Dialog, DialogContent, IconButton, Paper, Stack, Typography } from '@mui/material';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Box, Button, Dialog, DialogContent, IconButton, Paper, Stack, Typography } from '@mui/material';
 import ChevronLeft from '@mui/icons-material/ChevronLeft';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
+import AddPhotoIcon from '@mui/icons-material/AddPhotoAlternate';
 import { api, Edificio, errMsg } from '../api';
 
 export interface FotoRef { _id: string; nombreOriginal: string; descripcion: string }
@@ -83,17 +84,47 @@ function Visor({ edificioId, fotos, indice, onCambiar, onClose }: { edificioId: 
   );
 }
 
-export default function FotosEdificio({ edificio, fotos, puedeEditar, onCambio }: { edificio: Edificio; fotos: FotoRef[]; puedeEditar: boolean; onCambio: () => void }) {
+const MAX_BYTES = 10 * 1024 * 1024;
+
+/** simple: colegios y boliches (sin aviso de final de obra ni informe de Catastro). */
+export default function FotosEdificio({ edificio, fotos, puedeEditar, onCambio, simple = false }: { edificio: Edificio; fotos: FotoRef[]; puedeEditar: boolean; onCambio: () => void; simple?: boolean }) {
   const [abierta, setAbierta] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [subiendo, setSubiendo] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const subir = async (lista: FileList | null) => {
+    const archivos = Array.from(lista ?? []);
+    if (input.current) input.current.value = '';
+    if (!archivos.length) return;
+    if (archivos.length > 10) return setError('Hasta 10 fotos por vez');
+    const grande = archivos.find((f) => f.size > MAX_BYTES);
+    if (grande) return setError(`${grande.name} pesa más de 10 MB`);
+    const f = new FormData();
+    archivos.forEach((a) => f.append('fotos', a));
+    setSubiendo(true); setError('');
+    try {
+      const r = await api.post(`/edificios/${edificio._id}/fotos`, f);
+      if (r.data.rechazadas?.length) setError(`No se subieron (no son imágenes válidas): ${r.data.rechazadas.join(', ')}`);
+      onCambio();
+    } catch (e) { setError(errMsg(e)); }
+    finally { setSubiendo(false); }
+  };
   const eliminar = async (f: FotoRef) => {
     if (!window.confirm(`¿Eliminar la foto ${f.nombreOriginal}?`)) return;
     try { await api.delete(`/edificios/${edificio._id}/fotos/${f._id}`); onCambio(); } catch (e) { setError(errMsg(e)); }
   };
   return (
     <Stack spacing={2}>
-      <AvisoFinalDeObra e={edificio} />
-      {edificio.informe && (
+      {!simple && <AvisoFinalDeObra e={edificio} />}
+      {puedeEditar && (
+        <>
+          <input ref={input} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={(ev) => subir(ev.target.files)} />
+          <Button variant="outlined" startIcon={<AddPhotoIcon />} disabled={subiendo} onClick={() => input.current?.click()} sx={{ alignSelf: 'flex-start' }}>
+            {subiendo ? 'Subiendo…' : 'Adjuntar fotos'}
+          </Button>
+        </>
+      )}
+      {!simple && edificio.informe && (
         <Paper sx={{ p: 1.5 }}>
           <Typography variant="subtitle2" gutterBottom>Informe de inspección</Typography>
           <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{edificio.informe}</Typography>
@@ -101,7 +132,7 @@ export default function FotosEdificio({ edificio, fotos, puedeEditar, onCambio }
       )}
       {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
       {!fotos.length ? (
-        <Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="body2" color="text.secondary">Este edificio no tiene fotos cargadas. Se cargan desde Importar → Fotos (Word).</Typography></Paper>
+        <Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="body2" color="text.secondary">{simple ? 'Todavía no hay fotos.' : 'Este edificio no tiene fotos cargadas. Se cargan desde Importar → Fotos (Word).'}</Typography></Paper>
       ) : (
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 1 }}>
           {fotos.map((f, i) => (

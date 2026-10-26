@@ -31,6 +31,7 @@ userSchema.methods.comparePassword = function comparePassword(plain) {
 };
 
 // ---------- Campaña ----------
+const CATEGORIAS = ['EDIFICIOS', 'COLEGIOS', 'BOLICHES'];
 const campanaSchema = new Schema(
   {
     nombre: { type: String, required: true, trim: true },
@@ -38,6 +39,8 @@ const campanaSchema = new Schema(
     fechaInicio: Date,
     fechaFin: Date,
     activa: { type: Boolean, default: true },
+    // Cada categoría tiene su propia campaña: sus datos (importaciones, fotos, infracciones) no se mezclan.
+    categoria: { type: String, enum: CATEGORIAS, default: 'EDIFICIOS', index: true },
   },
   { timestamps: true }
 );
@@ -94,6 +97,7 @@ const edificioSchema = new Schema(
     lng: { type: Number, default: null },
     geoEstado: { type: String, enum: GEO_ESTADOS, default: 'pendiente', index: true },
     geoDisplayName: { type: String, default: '' },
+    codigo: { type: String, default: '', trim: true, index: true }, // ID del Excel (BAR-001, COL-001…), solo colegios y boliches
     titular: { type: String, default: '', trim: true },
     uso: { type: String, default: '', trim: true },
     observaciones: { type: String, default: '', trim: true },
@@ -269,6 +273,7 @@ module.exports = {
   GEO_ESTADOS,
   ESTADOS_INSPECCION,
   User: mongoose.model('User', userSchema),
+  CATEGORIAS,
   Campana: mongoose.model('Campana', campanaSchema),
   Inspector: mongoose.model('Inspector', inspectorSchema),
   MotivoInfraccion: mongoose.model('MotivoInfraccion', motivoSchema),

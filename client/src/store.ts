@@ -2,13 +2,13 @@ import { create } from 'zustand';
 
 export interface Filtros {
   calle: string;
-  semaforo: string;
   geoEstado: string;
   conInfraccion: string;
   conFotos: string;
   notificado: string;
+  categorias: string; // lista separada por comas; vacío = sin filtro (se ven todas)
 }
-const VACIOS: Filtros = { calle: '', semaforo: '', geoEstado: '', conInfraccion: '', conFotos: '', notificado: '' };
+const VACIOS: Filtros = { calle: '', geoEstado: '', conInfraccion: '', conFotos: '', notificado: '', categorias: '' };
 
 interface Estado {
   filtros: Filtros;

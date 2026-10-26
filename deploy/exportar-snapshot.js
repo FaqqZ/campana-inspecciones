@@ -35,7 +35,7 @@ const paginar = async (url, limit, params = {}) => {
   const edificios = await paginar('/edificios', 200);
   const infracciones = await paginar('/infracciones', 100);
   const notificaciones = await paginar('/notificaciones', 200, { todas: 'si' });
-  const mapa = (await get('/edificios/mapa')).puntos;
+  const mapa = (await get('/edificios/mapa?categorias=EDIFICIOS')).puntos;
   const fichas = {};
   const dirFotos = path.join(__dirname, '..', 'client', 'public', 'fotos');
   fs.rmSync(dirFotos, { recursive: true, force: true });

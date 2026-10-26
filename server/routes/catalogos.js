@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, Campana, DocumentoEdificio, Infraccion, Inspeccion, Edificio } = require('../models');
+const { CATEGORIAS, Inspector, MotivoInfraccion, TipoDocumento, Estado, Oficina, Campana, DocumentoEdificio, Infraccion, Inspeccion, Edificio } = require('../models');
 const { protect, authorize, permitir, audit } = require('../middleware/auth');
 
 router.use(protect);
@@ -92,8 +92,9 @@ router.get('/campanas', async (req, res) => res.json(await Campana.find().sort('
 
 router.post('/campanas', authorize(), async (req, res) => {
   if (!String(req.body.nombre || '').trim()) return res.status(400).json({ message: 'El nombre es obligatorio' });
-  const { nombre, descripcion, fechaInicio, fechaFin } = req.body;
-  const c = await Campana.create({ nombre, descripcion, fechaInicio, fechaFin });
+  const { nombre, descripcion, fechaInicio, fechaFin, categoria } = req.body;
+  if (categoria !== undefined && !CATEGORIAS.includes(categoria)) return res.status(400).json({ message: 'Categoría inválida' });
+  const c = await Campana.create({ nombre, descripcion, fechaInicio, fechaFin, categoria });
   audit('crear', 'Campana', c._id, req.user, c.nombre);
   res.status(201).json(c);
 });
